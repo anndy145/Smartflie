@@ -67,3 +67,6 @@ tmp/
 # Configuration
 .env
 config.local.json
+
+# Documentation
+SRS.md
