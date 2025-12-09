@@ -1,0 +1,144 @@
+name: Build
+
+on:
+  workflow_dispatch: # allows manual triggering
+
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+env:
+  QT_VERSION: "6.10.1"
+  DIRECTORY: "SmartFileOrganizer"
+
+jobs:
+  dist:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [linux_x64, macos_arm64, windows_x64]
+        include:
+          - build: linux_x64
+            os: ubuntu-latest
+          - build: macos_arm64
+            os: macos-latest
+          - build: windows_x64
+            os: windows-latest
+
+    steps:
+      - if: ${{ matrix.os == 'windows-latest' }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{env.QT_VERSION}}
+          arch: win64_mingw
+
+      - if: ${{ matrix.os != 'windows-latest' }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{env.QT_VERSION}}
+
+      - name: Install Build Dependencies
+        shell: bash
+        run: |
+          if [[ ${{ matrix.build }} == "macos_arm64" ]]; then
+            brew upgrade
+          elif [[ ${{ matrix.build }} == "windows_x64" ]]; then
+            echo "Nothing to do for now..."
+          elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
+            sudo apt-get update
+            sudo apt-get install ninja-build cmake
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build release package
+        shell: bash
+        run: |
+          mkdir -p build dist/${{ matrix.build }}
+          if [[ ${{ matrix.build }} == "windows_x64" ]]; then
+            
+            cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+            cmake --build build --parallel
+            cp -r build/SmartFileOrganizer.exe dist/${{ matrix.build }}
+          elif [[ ${{ matrix.build }} == "macos_arm64" ]]; then
+            cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
+            ninja -C build
+            cp build/SmartFileOrganizer dist/${{ matrix.build }}
+            cp -r build/bin/* dist/${{ matrix.build }}
+          elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
+            cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$CFLAGS -march=x86-64-v2" -DCMAKE_CXX_FLAGS="$CXXFLAGS -march=x86-64-v2"
+            ninja -C build
+            cp build/SmartFileOrganizer dist/${{ matrix.build }}
+            cp -r build/bin/* dist/${{ matrix.build }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.build }}
+          path: |
+            dist/${{ matrix.build }}
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: [dist]
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Calculate tag name
+        run: |
+          name=dev
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            name=${GITHUB_REF:10}
+          fi
+          echo val=$name >> $GITHUB_OUTPUT
+          echo TAG=$name >> $GITHUB_ENV
+        id: tagname
+
+      - name: Build archive
+        run: |
+          set -ex
+
+          rm -rf tmp
+          mkdir tmp
+          mkdir dist
+
+          for dir in artifact*; do
+            platform=${dir#"artifact-"}
+            unset exe
+            if [[ $platform =~ "windows" ]]; then
+              zip -r dist/${platform}.zip $dir
+            elif [[ $platform =~ "macos" ]]; then
+              zip -r dist/${platform}.zip $dir
+              # TODO: make dmg
+            elif [[ $platform =~ "linux" ]]; then
+              zip -r dist/${platform}.zip $dir
+              # TODO: make appimage
+            fi
+          done
+
+      - name: Upload as artifact
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/* # Zip the binaries under arti folder
+
+      - name: Upload binaries to release
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/* #Release the binary under dist folder
+          file_glob: true
+          tag: ${{ steps.tagname.outputs.val }}
+          overwrite: true
+
+      - name: Extract version
+        id: extract-version
+        run: |
+          printf "%s=%s\n" >> $GITHUB_OUTPUT tag-name "${GITHUB_REF#refs/tags/}"
