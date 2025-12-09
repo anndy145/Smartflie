@@ -41,14 +41,22 @@ jobs:
         run: |
           if [[ ${{ matrix.build }} == "macos_arm64" ]]; then
             brew upgrade
-            brew install qt
+            brew install qt vulkan-headers
+            # build macdeployqt
+            cd ~
+            git clone https://github.com/GDATASoftwareAG/macdeployqt
+            mkdir -p macdeployqt/build && cd macdeployqt/build
+            cmake -GNinja -S .. -DCMAKE_BUILD_TYPE=Release
+            cmake --build .
+            cp macdeployqt /usr/local/bin/macdeployqt
+            cp macdeployqt /usr/local/bin/macdeployqt6
           elif [[ ${{ matrix.build }} == "windows_x64" ]]; then
             echo "Nothing to do for now..."
           elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
             sudo apt update -y
             sudo apt install -y ninja-build cmake wget qt6-base-dev qt6-wayland libfuse2 \
               build-essential mesa-vulkan-drivers glslang-tools glslc libvulkan-dev libssl-dev \
-              libwayland-client0 libwayland-egl1 libwayland-cursor0
+              libwayland-client0 libwayland-egl1 libwayland-cursor0 libxkbcommon-dev
           fi
 
       - if: ${{ matrix.os == 'ubuntu-latest' }}
@@ -89,10 +97,17 @@ jobs:
             RESOURCES_DIR="$APP_DIR/Contents/Resources"
             FRAMEWORKS_DIR="$APP_DIR/Contents/Frameworks"
             mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$FRAMEWORKS_DIR"
+            
+            # Move binaries
             mv build/${{ env.DIRECTORY }} "$MACOS_DIR"
             mv build/bin/ggml-* "$RESOURCES_DIR"
-            mv build/bin/* "$FRAMEWORKS_DIR"
+            # Static libraries, No need to mv
+            # mv build/bin/* "$FRAMEWORKS_DIR"
             cp assets/MacOS/Info.plist "$APP_DIR/Contents/Info.plist"
+            
+            macdeployqt "$APP_DIR" -verbose=1
+            codesign --force --deep --sign - "$APP_DIR"
+
             sips -s format icns "assets/icon/icon.png" --out "$RESOURCES_DIR/icon.icns"
             hdiutil create -volname "${{ env.DIRECTORY }}" -srcfolder "$APP_DIR" -ov -format UDZO "dist/${{ matrix.build }}/${{ env.DIRECTORY }}-${{ matrix.build }}.dmg"
           elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
@@ -110,9 +125,11 @@ jobs:
             cp build/${{ env.DIRECTORY }} AppDir/usr/bin
             cp assets/linux/${{ env.DIRECTORY }}.desktop AppDir/usr/share/applications
             cp assets/icon/icon.png AppDir/usr/share/icons/hicolor/512x512/apps/icon.png
+
             export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
             export EXTRA_QT_MODULES="waylandcompositor"
             linuxdeploy --plugin=qt --appdir AppDir
+
             if [ "${{ matrix.arch }}" == "x86_64" ]; then
               ARCH=x86_64 appimagetool AppDir ${{ env.DIRECTORY }}-${{ matrix.build }}.AppImage
             else
