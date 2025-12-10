@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <nlohmann/json.hpp>
+
 
 class TagManager {
 public:
@@ -27,12 +27,13 @@ public:
     std::vector<std::string> getAllTags() const;
     std::vector<std::string> getFilesByTag(const std::string& tag) const;
 
+
+
 private:
     std::string currentDirectory;
-    std::string metadataFile;
-    nlohmann::json metadata;
     
-    std::string getMetadataPath() const;
+    // Migration helper
+    void migrateJsonToSql(const std::string& jsonPath);
 };
 
 #endif // TAGMANAGER_H

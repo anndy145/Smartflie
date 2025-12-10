@@ -1,10 +1,12 @@
 #include "GraphWidget.h"
 #include "../core/TagManager.h"
 #include <QGraphicsScene>
+#include <QGraphicsSceneMouseEvent>
 #include <QPainter>
-#include <QTimer>
-#include <QDebug>
-#include <qmath.h>
+#include <QStyleOption>
+#include <QRandomGenerator>
+#include <cmath>
+#include <filesystem>
 #include <QWheelEvent>
 #include <QStyleOptionGraphicsItem>
 #include <QRandomGenerator>

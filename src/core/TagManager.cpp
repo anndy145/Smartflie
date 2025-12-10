@@ -1,8 +1,10 @@
 #include "TagManager.h"
+#include "DatabaseManager.h"
 #include <fstream>
 #include <filesystem>
 #include <iostream>
 #include <set>
+#include <nlohmann/json.hpp> // For migration only
 
 #ifdef _WIN32
 #include <windows.h>
@@ -11,150 +13,153 @@
 namespace fs = std::filesystem;
 
 TagManager::TagManager() {
-    metadata = nlohmann::json::object();
 }
 
 void TagManager::loadTags(const std::string& directory) {
     currentDirectory = directory;
-    metadataFile = getMetadataPath();
-    metadata.clear();
+    
+    // Create .smartfile directory if not exists
+    std::string smartfileDir = currentDirectory + "/.smartfile";
+    if (!fs::exists(smartfileDir)) {
+        fs::create_directory(smartfileDir);
+#ifdef _WIN32
+        SetFileAttributesA(smartfileDir.c_str(), FILE_ATTRIBUTE_HIDDEN);
+#endif
+    }
 
-    if (fs::exists(metadataFile)) {
-        try {
-            std::ifstream f(metadataFile);
-            metadata = nlohmann::json::parse(f);
-        } catch (const std::exception& e) {
-            std::cerr << "Error loading metadata: " << e.what() << std::endl;
-            metadata = nlohmann::json::object();
+    // Init DB
+    std::string dbPath = smartfileDir + "/smartfile.db";
+    DatabaseManager::instance().init(QString::fromStdString(dbPath));
+
+    // Check for Migration
+    std::string jsonPath = smartfileDir + "/metadata.json";
+    if (fs::exists(jsonPath)) {
+        migrateJsonToSql(jsonPath);
+    }
+}
+
+void TagManager::migrateJsonToSql(const std::string& jsonPath) {
+    std::cout << "Migrating metadata.json to SQLite..." << std::endl;
+    try {
+        std::ifstream f(jsonPath);
+        nlohmann::json j = nlohmann::json::parse(f);
+        f.close();
+
+        for (auto& element : j.items()) {
+            std::string filename = element.key();
+            // Ensure file exists in DB
+            DatabaseManager::instance().addFile(QString::fromStdString(filename));
+            int fileId = DatabaseManager::instance().getFileId(QString::fromStdString(filename));
+            
+            for (const auto& tag : element.value()) {
+                std::string tagName = tag.get<std::string>();
+                int tagId = DatabaseManager::instance().getOrCreateTagId(QString::fromStdString(tagName));
+                DatabaseManager::instance().addTagToFile(fileId, tagId);
+            }
         }
-    } else {
-        metadata = nlohmann::json::object();
+        
+        // Rename json to .bak to prevent re-migration
+        std::string bakPath = jsonPath + ".bak";
+        if (fs::exists(bakPath)) fs::remove(bakPath);
+        fs::rename(jsonPath, bakPath);
+        std::cout << "Migration complete. metadata.json renamed to .bak" << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "Migration failed: " << e.what() << std::endl;
     }
 }
 
 void TagManager::saveTags() {
-    if (currentDirectory.empty()) return;
-
-    std::string smartfileDir = currentDirectory + "/.smartfile";
-    if (!fs::exists(smartfileDir)) {
-        fs::create_directory(smartfileDir);
-    }
-#ifdef _WIN32
-    SetFileAttributesA(smartfileDir.c_str(), FILE_ATTRIBUTE_HIDDEN);
-#endif
-
-    try {
-        std::ofstream f(metadataFile);
-        f << metadata.dump(4);
-    } catch (const std::exception& e) {
-        std::cerr << "Error saving metadata: " << e.what() << std::endl;
-    }
+    // No-op for SQLite (Auto-save)
 }
 
 void TagManager::addTag(const std::string& filename, const std::string& tag) {
-    if (!metadata.contains(filename)) {
-        metadata[filename] = nlohmann::json::array();
-    }
-    
-    // Check if tag already exists
-    bool exists = false;
-    for (const auto& t : metadata[filename]) {
-        if (t.get<std::string>() == tag) {
-            exists = true;
-            break;
-        }
-    }
-    
-    if (!exists) {
-        metadata[filename].push_back(tag);
-        saveTags();
-    }
+    auto& db = DatabaseManager::instance();
+    db.addFile(QString::fromStdString(filename));
+    int fileId = db.getFileId(QString::fromStdString(filename));
+    int tagId = db.getOrCreateTagId(QString::fromStdString(tag));
+    db.addTagToFile(fileId, tagId);
 }
 
 void TagManager::removeTag(const std::string& filename, const std::string& tag) {
-    if (metadata.contains(filename)) {
-        auto& tags = metadata[filename];
-        for (auto it = tags.begin(); it != tags.end(); ++it) {
-            if (it->get<std::string>() == tag) {
-                tags.erase(it);
-                saveTags();
-                break;
-            }
-        }
-    }
+    auto& db = DatabaseManager::instance();
+    int fileId = db.getFileId(QString::fromStdString(filename));
+    int tagId = db.getOrCreateTagId(QString::fromStdString(tag));
+    db.removeTagFromFile(fileId, tagId);
 }
 
 void TagManager::deleteTag(const std::string& tag) {
-    bool changed = false;
-    for (auto& element : metadata.items()) {
-        auto& tags = element.value();
-        for (auto it = tags.begin(); it != tags.end(); ) {
-            if (it->get<std::string>() == tag) {
-                it = tags.erase(it);
-                changed = true;
-            } else {
-                ++it;
-            }
-        }
-    }
-    if (changed) {
-        saveTags();
-    }
+    // TODO: Implement global tag deletion in DatabaseManager
+    // For now: No-op or we need to query all files
+    // Ideally: DELETE FROM tags WHERE name = tag; (CASCADE handles the rest)
+    QSqlQuery query;
+    query.prepare("DELETE FROM tags WHERE name = :name");
+    query.bindValue(":name", QString::fromStdString(tag));
+    query.exec();
 }
 
 std::vector<std::string> TagManager::getTags(const std::string& filename) const {
+    auto qTags = DatabaseManager::instance().getTagsForFile(QString::fromStdString(filename));
     std::vector<std::string> tags;
-    if (metadata.contains(filename)) {
-        for (const auto& t : metadata[filename]) {
-            tags.push_back(t.get<std::string>());
-        }
-    }
+    for(const auto& t : qTags) tags.push_back(t.toStdString());
     return tags;
 }
 
 void TagManager::setTags(const std::string& filename, const std::vector<std::string>& tags) {
-    metadata[filename] = tags;
-    saveTags();
+    auto& db = DatabaseManager::instance();
+    db.addFile(QString::fromStdString(filename));
+    db.clearTagsForFile(QString::fromStdString(filename));
+    
+    int fileId = db.getFileId(QString::fromStdString(filename));
+    for(const auto& t : tags) {
+        int tagId = db.getOrCreateTagId(QString::fromStdString(t));
+        db.addTagToFile(fileId, tagId);
+    }
 }
 
 void TagManager::renameFile(const std::string& oldFilename, const std::string& newFilename) {
-    if (metadata.contains(oldFilename)) {
-        metadata[newFilename] = metadata[oldFilename];
-        metadata.erase(oldFilename);
-        saveTags();
-    }
+    // Update path in DB
+    QSqlQuery query;
+    query.prepare("UPDATE files SET path = :new WHERE path = :old");
+    query.bindValue(":new", QString::fromStdString(newFilename));
+    query.bindValue(":old", QString::fromStdString(oldFilename));
+    query.exec();
 }
 
 void TagManager::removeFile(const std::string& filename) {
-    if (metadata.contains(filename)) {
-        metadata.erase(filename);
-        saveTags();
-    }
+    DatabaseManager::instance().removeFile(QString::fromStdString(filename));
 }
 
 std::vector<std::string> TagManager::getAllTags() const {
-    std::set<std::string> uniqueTags;
-    for (auto& element : metadata.items()) {
-        for (const auto& tag : element.value()) {
-            uniqueTags.insert(tag.get<std::string>());
-        }
+    // SELECT name FROM tags
+    std::vector<std::string> tags;
+    QSqlQuery query("SELECT name FROM tags");
+    while(query.next()) {
+        tags.push_back(query.value(0).toString().toStdString());
     }
-    return std::vector<std::string>(uniqueTags.begin(), uniqueTags.end());
+    return tags;
 }
 
 std::vector<std::string> TagManager::getFilesByTag(const std::string& tag) const {
+    // SELECT f.path FROM files f JOIN file_tags ft...
+    // Reuse DB Manager logic logic if possible? Or just query here?
+    // DatabaseManager doesn't expose this yet.
+    // Let's implement query here or add to Manager.
+    // Adding to Manager is cleaner but I can access DB via singleton if I wanted?
+    // Actually DatabaseManager::instance() gives access to methods, not raw DB unless I expose getDB().
+    // I'll query directly assuming I can include QSqlQuery headers.
+    
     std::vector<std::string> files;
-    for (auto& element : metadata.items()) {
-        for (const auto& t : element.value()) {
-            if (t.get<std::string>() == tag) {
-                files.push_back(element.key());
-                break;
-            }
+    QSqlQuery query;
+    query.prepare("SELECT f.path FROM files f "
+                  "JOIN file_tags ft ON f.id = ft.file_id "
+                  "JOIN tags t ON t.id = ft.tag_id "
+                  "WHERE t.name = :name");
+    query.bindValue(":name", QString::fromStdString(tag));
+    if (query.exec()) {
+        while(query.next()) {
+            files.push_back(query.value(0).toString().toStdString());
         }
     }
     return files;
-}
-
-std::string TagManager::getMetadataPath() const {
-    return currentDirectory + "/.smartfile/metadata.json";
 }
