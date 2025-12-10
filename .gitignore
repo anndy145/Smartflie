@@ -64,9 +64,16 @@ tmp/
 *.log
 *.tmp
 
+# Distribution
+release_staging/
+*.zip
+*_Setup_*.exe
+
 # Configuration
 .env
 config.local.json
 
 # Documentation
 SRS.md
+DISTRIBUTION.md
+INSTALLER_GUIDE.md
