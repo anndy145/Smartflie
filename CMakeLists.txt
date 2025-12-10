@@ -60,6 +60,8 @@ add_executable(SmartFileOrganizer
     src/core/DirectoryWatcher.h
     src/core/DatabaseManager.cpp
     src/core/DatabaseManager.h
+    src/core/VectorIndex.cpp
+    src/core/VectorIndex.h
     ${miniz_SOURCE_DIR}/miniz.c
 )
 
@@ -67,6 +69,7 @@ target_include_directories(SmartFileOrganizer PRIVATE
     ${CMAKE_BINARY_DIR}/_deps/llama_cpp-src/vendor
     ${CMAKE_BINARY_DIR}/_deps/llama_cpp-src/common
     ${miniz_SOURCE_DIR}
+    src/vendor/hnswlib
 )
 
 target_link_libraries(SmartFileOrganizer PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Sql llama nlohmann_json::nlohmann_json)

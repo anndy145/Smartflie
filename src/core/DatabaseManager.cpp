@@ -88,6 +88,19 @@ bool DatabaseManager::createTables()
         qDebug() << "Error creating vectors table:" << query.lastError();
         return false;
     }
+
+    // Full-Text Search Table (FTS5)
+    if (!query.exec("CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5("
+                    "filename, "
+                    "content, "
+                    "content='files', " 
+                    "content_rowid='id'" 
+                    ")")) {
+        qWarning() << "FTS5 creation with external content failed, trying simple FTS5:" << query.lastError();
+        if (!query.exec("CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(filename, content)")) {
+             qDebug() << "Error creating files_fts table (FTS5 might not be available):" << query.lastError();
+        }
+    }
     
     return true;
 }
