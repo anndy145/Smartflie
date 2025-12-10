@@ -18,6 +18,12 @@ endif()
 
 include(FetchContent)
 
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+# Force libraries to be built statically
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_STATIC ON CACHE BOOL "" FORCE)
+endif()
+
 # Set llama.cpp options before MakeAvailable
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

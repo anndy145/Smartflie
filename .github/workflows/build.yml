@@ -7,6 +7,11 @@ on:
     tags:
       - "v[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+"
+      - "V[0-9]+.[0-9]+"
+      - "V[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
 
 env:
   QT_VERSION: "6.10.1"
@@ -19,38 +24,53 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: [linux_x64, macos_arm64, windows_x64]
+        build: [linux_x64, macos_arm64]
         include:
           - build: linux_x64
             os: ubuntu-latest
+            arch: x86_64
           - build: macos_arm64
             os: macos-latest
-          - build: windows_x64
-            os: windows-latest
+            arch: aarch64
+          # - build: windows_x64
+          #   os: windows-latest
 
     steps:
+      - name: Install Build Dependencies
+        shell: bash
+        run: |
+          if [[ ${{ matrix.build }} == "macos_arm64" ]]; then
+            brew install qt
+          elif [[ ${{ matrix.build }} == "windows_x64" ]]; then
+            echo "Nothing to do for now..."
+          elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
+            sudo apt update -y
+            sudo apt install -y ninja-build cmake wget qt6-base-dev qt6-wayland libfuse2 \
+              build-essential mesa-vulkan-drivers glslang-tools glslc libvulkan-dev libssl-dev \
+              libwayland-client0 libwayland-egl1 libwayland-cursor0 libxkbcommon-dev
+          fi
+
+      - if: ${{ matrix.os == 'ubuntu-latest' }}
+        name: Install AppImage tools
+        run: |
+          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
+          sudo mv linuxdeploy-${{ matrix.arch }}.AppImage /usr/local/bin/linuxdeploy
+          sudo chmod +x /usr/local/bin/linuxdeploy
+          wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage 
+          sudo mv linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage /usr/local/bin/linuxdeploy-plugin-qt
+          sudo chmod +x /usr/local/bin/linuxdeploy-plugin-qt
+          wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${{ matrix.arch }}.AppImage
+          sudo mv appimagetool-${{ matrix.arch }}.AppImage /usr/local/bin/appimagetool
+          sudo chmod +x /usr/local/bin/appimagetool
+
       - if: ${{ matrix.os == 'windows-latest' }}
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{env.QT_VERSION}}
           arch: win64_mingw
-
-      - if: ${{ matrix.os != 'windows-latest' }}
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{env.QT_VERSION}}
-
-      - name: Install Build Dependencies
-        shell: bash
-        run: |
-          if [[ ${{ matrix.build }} == "macos_arm64" ]]; then
-            brew upgrade
-          elif [[ ${{ matrix.build }} == "windows_x64" ]]; then
-            echo "Nothing to do for now..."
-          elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
-            sudo apt-get update
-            sudo apt-get install ninja-build cmake
-          fi
+          use-official: true
+          email: ${{ secrets.QT_EMAIL }}
+          pw: ${{ secrets.QT_PW }}
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -60,20 +80,42 @@ jobs:
         run: |
           mkdir -p build dist/${{ matrix.build }}
           if [[ ${{ matrix.build }} == "windows_x64" ]]; then
-            
             cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-            cmake --build build --parallel
-            cp -r build/SmartFileOrganizer.exe dist/${{ matrix.build }}
+            cmake --build build -j$(nproc)
+            cp -r build/${{ env.DIRECTORY }}.exe dist/${{ matrix.build }}
           elif [[ ${{ matrix.build }} == "macos_arm64" ]]; then
             cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
             ninja -C build
-            cp build/SmartFileOrganizer dist/${{ matrix.build }}
-            cp -r build/bin/* dist/${{ matrix.build }}
+            cp build/${{ env.DIRECTORY }} build/bin
+            # zip the bin folder with name SmartFileOrganizer-${{ matrix.build }}.zip
+            zip -r dist/${{ env.DIRECTORY }}-${{ matrix.build }}.zip build/bin
+            cp dist/${{ env.DIRECTORY }}-${{ matrix.build }}.zip dist/${{ matrix.build }}
           elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
-            cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$CFLAGS -march=x86-64-v2" -DCMAKE_CXX_FLAGS="$CXXFLAGS -march=x86-64-v2"
+            cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
+              -DGGML_VULKAN=OFF \
+              -DCMAKE_C_FLAGS="$CFLAGS -march=x86-64-v3 -O3" -DCMAKE_CXX_FLAGS="$CXXFLAGS -march=x86-64-v3 -O3"
             ninja -C build
-            cp build/SmartFileOrganizer dist/${{ matrix.build }}
-            cp -r build/bin/* dist/${{ matrix.build }}
+            mkdir -p ${{ env.DIRECTORY }} AppDir/usr/bin AppDir/usr/lib64 AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/512x512/apps
+            cp -r build/bin/* ${{ env.DIRECTORY }}/
+            cp build/${{ env.DIRECTORY }} ${{ env.DIRECTORY }}/
+            tar -czvf ${{ env.DIRECTORY }}-${{ matrix.build }}.tar.gz ${{ env.DIRECTORY }}
+            cp ${{ env.DIRECTORY }}-${{ matrix.build }}.tar.gz dist/${{ matrix.build }}
+
+            cp -r build/bin/* AppDir/usr/lib64
+            cp build/${{ env.DIRECTORY }} AppDir/usr/bin
+            cp assets/linux/${{ env.DIRECTORY }}.desktop AppDir/usr/share/applications
+            cp assets/icon/icon.png AppDir/usr/share/icons/hicolor/512x512/apps/icon.png
+
+            export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
+            export EXTRA_QT_MODULES="waylandcompositor"
+            linuxdeploy --plugin=qt --appdir AppDir
+
+            if [ "${{ matrix.arch }}" == "x86_64" ]; then
+              ARCH=x86_64 appimagetool AppDir ${{ env.DIRECTORY }}-${{ matrix.build }}.AppImage
+            else
+              ARCH=arm_aarch64 appimagetool AppDir ${{ env.DIRECTORY }}-${{ matrix.build }}.AppImage
+            fi
+            mv ${{ env.DIRECTORY }}-${{ matrix.build }}.AppImage dist/${{ matrix.build }}
           fi
 
       - uses: actions/upload-artifact@v4
@@ -87,6 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [dist]
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
 
       - name: Calculate tag name
@@ -113,11 +156,10 @@ jobs:
             if [[ $platform =~ "windows" ]]; then
               zip -r dist/${platform}.zip $dir
             elif [[ $platform =~ "macos" ]]; then
-              zip -r dist/${platform}.zip $dir
-              # TODO: make dmg
+              cp $dir/${{ env.DIRECTORY }}-${platform}.zip dist
             elif [[ $platform =~ "linux" ]]; then
-              zip -r dist/${platform}.zip $dir
-              # TODO: make appimage
+              cp $dir/${{ env.DIRECTORY }}-${platform}.AppImage dist
+              cp $dir/${{ env.DIRECTORY }}-${platform}.tar.gz dist
             fi
           done
 
@@ -126,14 +168,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binaries
-          path: dist/* # Zip the binaries under arti folder
+          path: dist/*
 
       - name: Upload binaries to release
         if: ${{ github.event_name != 'workflow_dispatch' }}
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: dist/* #Release the binary under dist folder
+          file: dist/*
           file_glob: true
           tag: ${{ steps.tagname.outputs.val }}
           overwrite: true
