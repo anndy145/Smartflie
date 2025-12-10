@@ -63,6 +63,7 @@ add_executable(SmartFileOrganizer
     src/core/VectorIndex.cpp
     src/core/VectorIndex.h
     ${miniz_SOURCE_DIR}/miniz.c
+    smartfile.rc
 )
 
 target_include_directories(SmartFileOrganizer PRIVATE 

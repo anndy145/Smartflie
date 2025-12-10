@@ -32,7 +32,7 @@ Copy-Item $ExePath $OutputDir
 # 3. Run windeployqt
 Write-Host "Running windeployqt to capture Qt dependencies..."
 $Windeployqt = "windeployqt.exe"
-if ($QtBinDir -ne "") {
+if ($QtBinDir -ne "" -and (Test-Path $QtBinDir)) {
     $Windeployqt = Join-Path $QtBinDir "windeployqt.exe"
 }
 
