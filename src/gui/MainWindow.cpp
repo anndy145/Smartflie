@@ -32,6 +32,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     resize(1200, 800);
     setWindowTitle("Smart File Organizer");
+    
+    // Connect Watcher
+    connect(&dirWatcher, &DirectoryWatcher::fileAdded, this, &MainWindow::onMoniFileAdded);
+    connect(&dirWatcher, &DirectoryWatcher::fileDeleted, this, &MainWindow::onMoniFileDeleted);
 }
 
 MainWindow::~MainWindow()
@@ -222,6 +226,7 @@ void MainWindow::openFolder()
 
     if (!dir.isEmpty()) {
         currentPath = dir;
+        dirWatcher.addPath(currentPath); // Start Monitoring
         tagManager.loadTags(currentPath.toStdString());
         scanFiles();
     }
@@ -347,8 +352,7 @@ void MainWindow::analyzeFile()
     } 
     else if (ext == ".docx" || ext == ".xlsx" || ext == ".pptx" || 
              ext == ".odt" || ext == ".odf" || 
-             ext == ".html" || ext == ".htm" || ext == ".shtml" || ext == ".xhtml" || 
-             ext == ".pdf") {
+             ext == ".html" || ext == ".htm" || ext == ".shtml" || ext == ".xhtml") {
         lblStatus->setText(QString("æ­£åœ¨è§£ææ–‡ä»¶å…§å®¹: %1").arg(filename));
         content = DocumentParser::extractText(filePath.toStdString());
     }
@@ -797,3 +801,16 @@ void MainWindow::fitToWindow() {
         updateImageDisplay();
     }
 }
+
+void MainWindow::onMoniFileAdded(const QString &path)
+{
+    lblStatus->setText("°»´ú¨ì·sÀÉ®×: " + path);
+    scanFiles(); // Refresh list
+}
+
+void MainWindow::onMoniFileDeleted(const QString &path)
+{
+    lblStatus->setText("°»´ú¨ìÀÉ®×§R°£: " + path);
+    scanFiles(); // Refresh list
+}
+

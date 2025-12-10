@@ -56,6 +56,8 @@ add_executable(SmartFileOrganizer
     src/ai/LlamaEngine.h
     src/core/DocumentParser.cpp
     src/core/DocumentParser.h
+    src/core/DirectoryWatcher.cpp
+    src/core/DirectoryWatcher.h
     ${miniz_SOURCE_DIR}/miniz.c
 )
 

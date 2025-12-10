@@ -24,8 +24,6 @@ std::string DocumentParser::extractText(const std::string& filePath)
         return parseOdt(filePath);
     } else if (ext == ".html" || ext == ".htm" || ext == ".shtml" || ext == ".xhtml") {
         return parseHtml(filePath);
-    } else if (ext == ".pdf") {
-        return parsePdf(filePath);
     }
     return "";
 }
@@ -237,9 +235,4 @@ std::string DocumentParser::parseHtml(const std::string& filePath)
     return data.toStdString();
 }
 
-std::string DocumentParser::parsePdf(const std::string& filePath)
-{
-    // Qt PDF module is not available in standard generic Qt build environment often.
-    // Without poppler/podofo, we can't extract text robustly.
-    return "[PDF Content: Text extraction not available without external libraries. Please use DOCX or Text files for analysis.]";
-}
+

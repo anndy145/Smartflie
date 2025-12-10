@@ -19,6 +19,7 @@
 #include "GraphWidget.h"
 #include "../ai/LlamaEngine.h"
 #include "../core/TagManager.h"
+#include "../core/DirectoryWatcher.h"
 
 class MainWindow : public QMainWindow
 {
@@ -99,6 +100,13 @@ private:
     // State
     QPixmap currentPreviewPixmap; // Store original for resizing logic
     double scaleFactor = 1.0;
+
+    // Watcher
+    DirectoryWatcher dirWatcher;
+
+private slots:
+    void onMoniFileAdded(const QString &path);
+    void onMoniFileDeleted(const QString &path);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;

@@ -1,0 +1,12 @@
+
+void MainWindow::onMoniFileAdded(const QString &path)
+{
+    lblStatus->setText("偵測到新檔案: " + path);
+    scanFiles(); // Refresh list
+}
+
+void MainWindow::onMoniFileDeleted(const QString &path)
+{
+    lblStatus->setText("偵測到檔案刪除: " + path);
+    scanFiles(); // Refresh list
+}
