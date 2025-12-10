@@ -40,16 +40,7 @@ jobs:
         shell: bash
         run: |
           if [[ ${{ matrix.build }} == "macos_arm64" ]]; then
-            brew upgrade
-            brew install qt vulkan-headers
-            # build macdeployqt
-            cd ~
-            git clone https://github.com/GDATASoftwareAG/macdeployqt
-            mkdir -p macdeployqt/build && cd macdeployqt/build
-            cmake -GNinja -S .. -DCMAKE_BUILD_TYPE=Release
-            cmake --build .
-            cp macdeployqt /usr/local/bin/macdeployqt
-            cp macdeployqt /usr/local/bin/macdeployqt6
+            brew install qt
           elif [[ ${{ matrix.build }} == "windows_x64" ]]; then
             echo "Nothing to do for now..."
           elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
@@ -77,6 +68,9 @@ jobs:
         with:
           version: ${{env.QT_VERSION}}
           arch: win64_mingw
+          use-official: true
+          email: ${{ secrets.QT_EMAIL }}
+          pw: ${{ secrets.QT_PW }}
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -92,24 +86,10 @@ jobs:
           elif [[ ${{ matrix.build }} == "macos_arm64" ]]; then
             cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
             ninja -C build
-            APP_DIR="${{ env.DIRECTORY }}.app"
-            MACOS_DIR="$APP_DIR/Contents/MacOS"
-            RESOURCES_DIR="$APP_DIR/Contents/Resources"
-            FRAMEWORKS_DIR="$APP_DIR/Contents/Frameworks"
-            mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$FRAMEWORKS_DIR"
-            
-            # Move binaries
-            mv build/${{ env.DIRECTORY }} "$MACOS_DIR"
-            mv build/bin/ggml-* "$RESOURCES_DIR"
-            # Static libraries, No need to mv
-            # mv build/bin/* "$FRAMEWORKS_DIR"
-            cp assets/MacOS/Info.plist "$APP_DIR/Contents/Info.plist"
-            
-            macdeployqt "$APP_DIR" -verbose=1
-            codesign --force --deep --sign - "$APP_DIR"
-
-            sips -s format icns "assets/icon/icon.png" --out "$RESOURCES_DIR/icon.icns"
-            hdiutil create -volname "${{ env.DIRECTORY }}" -srcfolder "$APP_DIR" -ov -format UDZO "dist/${{ matrix.build }}/${{ env.DIRECTORY }}-${{ matrix.build }}.dmg"
+            cp build/${{ env.DIRECTORY }} build/bin
+            # zip the bin folder with name SmartFileOrganizer-${{ matrix.build }}.zip
+            zip -r dist/${{ env.DIRECTORY }}-${{ matrix.build }}.zip build/bin
+            cp dist/${{ env.DIRECTORY }}-${{ matrix.build }}.zip dist/${{ matrix.build }}
           elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
             cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
               -DGGML_VULKAN=OFF \
@@ -176,7 +156,7 @@ jobs:
             if [[ $platform =~ "windows" ]]; then
               zip -r dist/${platform}.zip $dir
             elif [[ $platform =~ "macos" ]]; then
-              cp $dir/${{ env.DIRECTORY }}-${platform}.dmg dist
+              cp $dir/${{ env.DIRECTORY }}-${platform}.zip dist
             elif [[ $platform =~ "linux" ]]; then
               cp $dir/${{ env.DIRECTORY }}-${platform}.AppImage dist
               cp $dir/${{ env.DIRECTORY }}-${platform}.tar.gz dist
