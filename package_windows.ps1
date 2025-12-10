@@ -73,11 +73,32 @@ if (Test-Path $LlamaDll) {
 
 
 
-# 6. Create Portable ZIP
-$ZipPath = Join-Path $ProjectRoot "SmartFile_Portable_v1.0.zip"
-Write-Host "Creating Portable ZIP: $ZipPath..."
-if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
-Compress-Archive -Path "$OutputDir\*" -DestinationPath $ZipPath -Force
+# 6. Create Installer (Inno Setup)
+Write-Host "Checking for Inno Setup..."
+$ISCC = "ISCC.exe"
+# Common paths for Inno Setup
+$PossiblePaths = @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+)
+
+if ((Get-Command $ISCC -ErrorAction SilentlyContinue) -eq $null) {
+    foreach ($path in $PossiblePaths) {
+        if (Test-Path $path) { 
+            $ISCC = $path
+            break 
+        }
+    }
+}
+
+if ((Get-Command $ISCC -ErrorAction SilentlyContinue) -ne $null -or (Test-Path $ISCC)) {
+    Write-Host "Compiling Installer with Inno Setup..."
+    & $ISCC "installer_windows.iss"
+    Write-Host "Installer created successfully."
+} else {
+    Write-Host "Inno Setup (ISCC.exe) not found. Skipping installer generation." -ForegroundColor Yellow
+    Write-Host "Please install Inno Setup 6+ to generate the .exe installer."
+}
 
 Write-Host "Packaging Complete!" -ForegroundColor Green
 Write-Host "  - Portable ZIP: $ZipPath"
@@ -86,3 +107,4 @@ Write-Host "  - Portable ZIP: $ZipPath"
 Write-Host "Cleaning up staging directory to save space..."
 if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
 Write-Host "Done."
+```

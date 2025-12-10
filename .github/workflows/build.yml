@@ -60,13 +60,15 @@ jobs:
         run: |
           mkdir -p build dist/${{ matrix.build }}
           if [[ ${{ matrix.build }} == "windows_x64" ]]; then
-            
-            # Use our packaging script
+            # Install Inno Setup
+            choco install innosetup
+
+            # Run packaging script (compiles installer)
             ./package_windows.ps1
             
-            # The script creates 'release_staging', but let's copy the portable zip instead
-            mkdir -p dist/${{ matrix.build }}
-            mv SmartFile_Portable_v1.0.zip dist/${{ matrix.build }}/
+            # Move the generated setup exe to dist
+            mv SmartFile_Setup_*.exe dist/${{ matrix.build }}/
+            
           elif [[ ${{ matrix.build }} == "macos_arm64" ]]; then
             cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
             ninja -C build
