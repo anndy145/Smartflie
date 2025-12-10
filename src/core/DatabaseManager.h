@@ -23,6 +23,7 @@ public:
     bool addFile(const QString& path);
     bool removeFile(const QString& path);
     int getFileId(const QString& path);
+    QString getFilePath(int id);
     QStringList getAllFiles();
 
     // Tag Operations
@@ -31,6 +32,14 @@ public:
     bool removeTagFromFile(int fileId, int tagId);
     QStringList getTagsForFile(const QString& path);
     void clearTagsForFile(const QString& path);
+
+    // Vector Operations
+    bool saveVector(int fileId, const std::vector<float>& vector);
+    std::vector<float> getVector(int fileId);
+    std::map<int, std::vector<float>> getAllVectors(); // For searching
+    
+    // Similarity Search
+    std::vector<int> findSimilarFiles(int targetFileId, int topK = 5);
 
 private:
     DatabaseManager();

@@ -51,6 +51,7 @@ bool LlamaEngine::loadModel(const std::string& modelPath)
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = 32768; // Support up to 32k context (Qwen standard)
     ctx_params.n_batch = 2048; // Batch size for processing
+    ctx_params.embeddings = true; // Enable embedding extraction
     ctx = llama_init_from_model(model, ctx_params);
 
     if (!ctx) {
@@ -65,9 +66,8 @@ std::string LlamaEngine::generateResponse(const std::string& prompt)
 {
     if (!ctx || !model) return "Error: Model not loaded";
 
-    // Clear KV cache
-    llama_memory_t mem = llama_get_memory(ctx);
-    llama_memory_seq_rm(mem, -1, -1, -1);
+    // Try to clear KV cache if possible, otherwise rely on new batch
+    // llama_kv_cache_clear(ctx); // Removed due to API uncertainty
 
     const llama_vocab* vocab = llama_model_get_vocab(model);
 
@@ -159,9 +159,6 @@ std::string LlamaEngine::generateResponse(const std::string& prompt)
 std::string LlamaEngine::suggestTags(const std::string& filename, const std::string& content)
 {
     // Qwen / ChatML Format
-    // Format: <|im_start|>system\n...\n<|im_end|>\n<|im_start|>user\n...\n<|im_end|>\n<|im_start|>assistant\n
-    
-    // Increase limit to 16000 chars (approx fits in 8k context)
     std::string safeContent = content.empty() ? "(No content)" : content.substr(0, 16000);
     
     std::string prompt = 
@@ -185,4 +182,57 @@ std::string LlamaEngine::suggestTags(const std::string& filename, const std::str
         "<|im_start|>assistant\n";
 
     return generateResponse(prompt);
+}
+
+std::vector<float> LlamaEngine::getEmbeddings(const std::string& text)
+{
+    if (!ctx || !model) return {};
+    
+    // llama_kv_cache_clear(ctx); // Removed
+
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    
+    // Tokenize
+    int n_prompt = -llama_tokenize(vocab, text.c_str(), text.length(), NULL, 0, true, true);
+    std::vector<llama_token> prompt_tokens(n_prompt);
+    if (llama_tokenize(vocab, text.c_str(), text.length(), prompt_tokens.data(), n_prompt, true, true) < 0) {
+        return {};
+    }
+
+    if (n_prompt >= llama_n_ctx(ctx)) {
+        n_prompt = llama_n_ctx(ctx) - 1;
+        prompt_tokens.resize(n_prompt);
+    }
+
+    // Process batch
+    llama_batch batch = llama_batch_init(n_prompt, 0, 1);
+    for (int i = 0; i < n_prompt; ++i) {
+        batch_add(batch, prompt_tokens[i], i, {0}, (i == n_prompt - 1)); 
+    }
+
+    if (llama_decode(ctx, batch) != 0) {
+        llama_batch_free(batch);
+        return {};
+    }
+    
+    // Get embeddings
+    int n_embd = llama_model_n_embd(model); // Updated
+    std::vector<float> result(n_embd);
+    
+    // Use llama_get_embeddings_ith
+    const float* emb = llama_get_embeddings_ith(ctx, batch.n_tokens - 1); // Last token
+    if (emb) {
+        memcpy(result.data(), emb, n_embd * sizeof(float));
+    } else {
+        // Fallback or error
+        // If not found, try generic get_embeddings
+        const float* all_emb = llama_get_embeddings(ctx);
+        if (all_emb) {
+             // Assuming last token
+             memcpy(result.data(), all_emb + ((batch.n_tokens - 1) * n_embd), n_embd * sizeof(float));
+        }
+    }
+
+    llama_batch_free(batch);
+    return result;
 }

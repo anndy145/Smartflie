@@ -30,9 +30,6 @@ bool DatabaseManager::init(const QString& dbName)
         db = QSqlDatabase::database("qt_sql_default_connection");
     } else {
         db = QSqlDatabase::addDatabase("QSQLITE");
-        // Store DB in the .smartfile folder (or relative to exec)
-        // For now, let's keep it next to metadata.json in the user customized folder is hard
-        // Let's store it in a standard location or local directory
         db.setDatabaseName(dbName);
     }
 
@@ -78,6 +75,17 @@ bool DatabaseManager::createTables()
                     "FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE"
                     ")")) {
         qDebug() << "Error creating file_tags table:" << query.lastError();
+        return false;
+    }
+
+    // Vectors Table (One-to-One with Files)
+    if (!query.exec("CREATE TABLE IF NOT EXISTS vectors ("
+                    "file_id INTEGER PRIMARY KEY, "
+                    "data BLOB, "
+                    "dim INTEGER, "
+                    "FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE"
+                    ")")) {
+        qDebug() << "Error creating vectors table:" << query.lastError();
         return false;
     }
     
@@ -189,5 +197,114 @@ bool DatabaseManager::removeTagFromFile(int fileId, int tagId)
     query.bindValue(":fid", fileId);
     query.bindValue(":tid", tagId);
     return query.exec();
+}
+
+
+bool DatabaseManager::saveVector(int fileId, const std::vector<float>& vector)
+{
+    if (vector.empty()) return false;
+    
+    QByteArray blob(reinterpret_cast<const char*>(vector.data()), vector.size() * sizeof(float));
+    
+    QSqlQuery query;
+    query.prepare("INSERT OR REPLACE INTO vectors (file_id, data, dim) VALUES (:fid, :data, :dim)");
+    query.bindValue(":fid", fileId);
+    query.bindValue(":data", blob);
+    query.bindValue(":dim", (int)vector.size());
+    return query.exec();
+}
+
+std::vector<float> DatabaseManager::getVector(int fileId)
+{
+    std::vector<float> vec;
+    QSqlQuery query;
+    query.prepare("SELECT data, dim FROM vectors WHERE file_id = :fid");
+    query.bindValue(":fid", fileId);
+    
+    if (query.exec() && query.next()) {
+        QByteArray blob = query.value(0).toByteArray();
+        int dim = query.value(1).toInt();
+        
+        vec.resize(dim);
+        memcpy(vec.data(), blob.constData(), blob.size());
+    }
+    return vec;
+}
+
+std::map<int, std::vector<float>> DatabaseManager::getAllVectors()
+{
+    std::map<int, std::vector<float>> result;
+    QSqlQuery query("SELECT file_id, data, dim FROM vectors");
+    
+    while (query.next()) {
+        int fileId = query.value(0).toInt();
+        QByteArray blob = query.value(1).toByteArray();
+        int dim = query.value(2).toInt();
+        
+        std::vector<float> vec(dim);
+        memcpy(vec.data(), blob.constData(), blob.size());
+        
+        result[fileId] = vec;
+    }
+    return result;
+}
+
+#include <cmath>
+#include <algorithm>
+
+static float cosineSimilarity(const std::vector<float>& A, const std::vector<float>& B) {
+    if (A.size() != B.size() || A.empty()) return 0.0f;
+    
+    float dot = 0.0f;
+    float normA = 0.0f;
+    float normB = 0.0f;
+    
+    for (size_t i = 0; i < A.size(); ++i) {
+        dot += A[i] * B[i];
+        normA += A[i] * A[i];
+        normB += B[i] * B[i];
+    }
+    
+    if (normA == 0 || normB == 0) return 0.0f;
+    return dot / (std::sqrt(normA) * std::sqrt(normB));
+}
+
+std::vector<int> DatabaseManager::findSimilarFiles(int targetFileId, int topK)
+{
+    std::vector<float> targetVec = getVector(targetFileId);
+    if (targetVec.empty()) return {};
+    
+    std::map<int, std::vector<float>> allVecs = getAllVectors();
+    std::vector<std::pair<int, float>> scores;
+    
+    for (const auto& [id, vec] : allVecs) {
+        if (id == targetFileId) continue; // Skip self
+        
+        float score = cosineSimilarity(targetVec, vec);
+        scores.push_back({id, score});
+    }
+    
+    // Sort descending
+    std::sort(scores.begin(), scores.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+    
+    std::vector<int> result;
+    for (int i = 0; i < std::min((int)scores.size(), topK); ++i) {
+        result.push_back(scores[i].first);
+    }
+    return result;
+}
+
+
+QString DatabaseManager::getFilePath(int id)
+{
+    QSqlQuery query;
+    query.prepare("SELECT path FROM files WHERE id = :id");
+    query.bindValue(":id", id);
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+    return QString();
 }
 

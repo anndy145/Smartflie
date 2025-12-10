@@ -15,6 +15,9 @@ public:
     bool isModelLoaded() const { return model != nullptr; }
     std::string generateResponse(const std::string& prompt);
     std::string suggestTags(const std::string& filename, const std::string& content);
+    
+    // Embedding Support
+    std::vector<float> getEmbeddings(const std::string& text);
 
 private:
     struct llama_model* model = nullptr;

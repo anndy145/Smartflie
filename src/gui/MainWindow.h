@@ -108,6 +108,10 @@ private slots:
     void onMoniFileAdded(const QString &path);
     void onMoniFileDeleted(const QString &path);
 
+    // Vector UI
+    void onGenerateEmbedding(); // Context menu action
+    void onFindSimilar();       // Context menu action
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 

@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "../core/DocumentParser.h"
+#include "../core/DatabaseManager.h"
 #include "../core/FileScanner.h"
 #include "../core/DocumentParser.h"
 
@@ -671,6 +673,14 @@ void MainWindow::showContextMenu(const QPoint &pos)
     connect(&actionDelete, &QAction::triggered, this, &MainWindow::deleteFile);
     contextMenu.addAction(&actionDelete);
 
+    
+    contextMenu.addSeparator();
+    QAction *genVectorAction = contextMenu.addAction("Generate Embedding");
+    QAction *findSimilarAction = contextMenu.addAction("Find Similar");
+
+    connect(genVectorAction, &QAction::triggered, this, &MainWindow::onGenerateEmbedding);
+    connect(findSimilarAction, &QAction::triggered, this, &MainWindow::onFindSimilar);
+
     contextMenu.exec(fileList->mapToGlobal(pos));
 }
 
@@ -814,3 +824,84 @@ void MainWindow::onMoniFileDeleted(const QString &path)
     scanFiles(); // Refresh list
 }
 
+
+
+void MainWindow::onGenerateEmbedding()
+{
+    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
+    if (selectedItems.isEmpty()) return;
+
+    QString filePath = selectedItems.first()->data(Qt::UserRole).toString();
+    
+    lblStatus->setText("Reading Content...");
+    QApplication::processEvents();
+    
+    std::string content = DocumentParser::extractText(filePath.toStdString());
+    if (content.empty()) {
+        QMessageBox::warning(this, "Info", "No text content extracted.");
+        lblStatus->setText("Ready");
+        return;
+    }
+
+    if (!llamaEngine.isModelLoaded()) {
+        QMessageBox::warning(this, "Error", "Please load model first (Open Folder).");
+        return;
+    }
+
+    lblStatus->setText("Generating Embedding...");
+    QApplication::processEvents();
+    
+    std::vector<float> vec = llamaEngine.getEmbeddings(content);
+    if (vec.empty()) {
+        QMessageBox::critical(this, "Error", "Failed to generate embedding.");
+        lblStatus->setText("Error");
+        return;
+    }
+
+    auto& db = DatabaseManager::instance();
+    db.addFile(filePath);
+    int fileId = db.getFileId(filePath);
+    
+    if (db.saveVector(fileId, vec)) {
+        lblStatus->setText("Vector Saved!");
+        QMessageBox::information(this, "Success", "Vector saved to database.");
+    } else {
+        lblStatus->setText("Save Failed");
+        QMessageBox::critical(this, "Error", "Failed to save to database.");
+    }
+}
+
+void MainWindow::onFindSimilar()
+{
+    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
+    if (selectedItems.isEmpty()) return;
+
+    QString filePath = selectedItems.first()->data(Qt::UserRole).toString();
+    auto& db = DatabaseManager::instance();
+    int fileId = db.getFileId(filePath);
+
+    if (fileId == -1) {
+        QMessageBox::warning(this, "Info", "File not indexed. Run Generate Embedding first?");
+        return;
+    }
+    
+    if (db.getVector(fileId).empty()) {
+        QMessageBox::warning(this, "Info", "No vector found. Run Generate Embedding first.");
+        return;
+    }
+
+    std::vector<int> similarIds = db.findSimilarFiles(fileId, 5); 
+    
+    if (similarIds.empty()) {
+        QMessageBox::information(this, "Result", "No similar files found.");
+        return;
+    }
+
+    QString resultMsg = "Top 5 Similar Files:\n\n";
+    for (int id : similarIds) {
+        QString path = db.getFilePath(id);
+        resultMsg += QFileInfo(path).fileName() + "\n";
+    }
+    
+    QMessageBox::information(this, "Similarity Result", resultMsg);
+}
