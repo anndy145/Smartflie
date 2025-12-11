@@ -136,7 +136,7 @@ void MainWindow::setupLayout()
     rightLayout->addWidget(new QLabel("檔案預覽 (Preview)"));
 
     // Preview Area
-    QScrollArea *scrollArea = new QScrollArea(this);
+    scrollArea = new QScrollArea(this);
     scrollArea->setBackgroundRole(QPalette::Dark);
     scrollArea->setWidgetResizable(false); 
     scrollArea->setAlignment(Qt::AlignCenter); 
@@ -204,8 +204,8 @@ void MainWindow::setupLayout()
     mainSplitter->addWidget(rightPanel);
 
     mainSplitter->setStretchFactor(0, 1);
-    mainSplitter->setStretchFactor(1, 2);
-    mainSplitter->setStretchFactor(2, 7);
+    mainSplitter->setStretchFactor(1, 1);
+    mainSplitter->setStretchFactor(2, 1);
 
     tabWidget->addTab(explorerTab, "檔案瀏覽器 (Explorer)");
 
