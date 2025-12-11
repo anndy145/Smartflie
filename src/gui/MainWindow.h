@@ -2,6 +2,8 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 #include <QListWidget>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -36,7 +38,8 @@ private slots:
     void analyzeFile();
     void onAnalysisFinished();
     void saveTags();
-    void openFile(QListWidgetItem* item); // Double click
+
+    void openFile(QTreeWidgetItem* item, int column); // Double click
     void renameFile(); // Context menu
     void deleteFile(); // Context menu
     void showContextMenu(const QPoint &pos); // Right click
@@ -44,7 +47,8 @@ private slots:
     void removeTag();
     void removeGlobalTag();
     void filterFiles(const QString &text);
-    void onFileSelected(QListWidgetItem *item);
+    void onFileSelected(QTreeWidgetItem *item, int column);
+    void onItemExpanded(QTreeWidgetItem *item);
     void onTagSelected(QListWidgetItem *item);
     void onTabChanged(int index);
     // Zooming
@@ -75,7 +79,7 @@ private:
     // Middle Panel (Files)
     QWidget *middlePanel;
     QLineEdit *txtSearch;
-    QListWidget *fileList;
+    QTreeWidget *fileList;
     
     // Right Panel (Details)
     QWidget *rightPanel;
@@ -121,6 +125,8 @@ private:
     void updateTagList();
     void updateFilePreview(const QString& filePath);
     void updateTagDisplay(const QString& filename);
+    // Helper to find or create tree items
+    QTreeWidgetItem* findOrCreateParent(const QString& path, std::map<QString, QTreeWidgetItem*>& nodeMap);
 };
 
 #endif // MAINWINDOW_H

@@ -25,7 +25,7 @@ std::string DocumentParser::extractText(const std::string& filePath)
     } else if (ext == ".html" || ext == ".htm" || ext == ".shtml" || ext == ".xhtml") {
         return parseHtml(filePath);
     }
-    }
+
     
     // Explicitly supported text extensions
     static const std::set<std::string> textExts = {

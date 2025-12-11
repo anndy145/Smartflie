@@ -1,4 +1,4 @@
-#include "MainWindow.h"
+﻿#include "MainWindow.h"
 #include "../core/DocumentParser.h"
 #include "../core/DatabaseManager.h"
 #include "../core/FileScanner.h"
@@ -6,7 +6,7 @@
 
 #include <QFileDialog>
 #include <QMessageBox>
-#include <QInputDialog> // Added
+#include <QInputDialog> 
 #include <QApplication>
 #include <QDesktopServices>
 #include <QUrl>
@@ -16,6 +16,9 @@
 #include <fstream>
 #include <algorithm>
 #include <set>
+#include <QTreeWidgetItem>
+#include <QThreadPool>
+#include <QtConcurrent/QtConcurrent>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -49,44 +52,38 @@ void MainWindow::setupToolbar()
     toolbar = addToolBar("Main Toolbar");
     toolbar->setMovable(false);
 
-    QAction *actOpen = toolbar->addAction("開啟資料夾 (Open Folder)");
-    connect(actOpen, &QAction::triggered, this, &MainWindow::openFolder);
+    QAction *openAction = new QAction("開啟資料夾 (Open Folder)", this);
+    connect(openAction, &QAction::triggered, this, &MainWindow::openFolder);
+    toolbar->addAction(openAction);
 
-    toolbar->addSeparator();
-
-    QAction *actLoadModel = toolbar->addAction("載入模型 (Load Model)");
-    actLoadModel->setToolTip("請選擇 ggml-model-*.gguf 檔案");
-    connect(actLoadModel, &QAction::triggered, this, &MainWindow::loadModel);
-
-    toolbar->addSeparator();
-    
-    // Add Checkbox to Toolbar
-    chkRecursive = new QCheckBox("包含子資料夾 (Recursive)", this);
-    chkRecursive->setChecked(false); // Default to false as per request
-    // Connect toggling to re-scan immediately if a folder is already open
-    connect(chkRecursive, &QCheckBox::toggled, [this](bool){
-        if (!currentPath.isEmpty()) scanFiles();
-    });
+    chkRecursive = new QCheckBox("遞迴掃描 (Recursive)", this);
+    chkRecursive->setChecked(true); 
+    // Note: Recursive check now mostly affects searching or tagging operations, 
+    // as the Tree View is lazy-loaded by default to prevent freezing.
     toolbar->addWidget(chkRecursive);
+
+    toolbar->addSeparator();
+
+    QAction *loadModelAction = new QAction("載入模型 (Load Model)", this);
+    connect(loadModelAction, &QAction::triggered, this, &MainWindow::loadModel);
+    toolbar->addAction(loadModelAction);
 }
 
 void MainWindow::setupLayout()
 {
     tabWidget = new QTabWidget(this);
-    connect(tabWidget, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
     mainLayout->addWidget(tabWidget);
 
     // === Tab 1: Explorer ===
-    explorerTab = new QWidget();
-    QVBoxLayout *explorerLayout = new QVBoxLayout(explorerTab);
-    
-    mainSplitter = new QSplitter(Qt::Horizontal, explorerTab);
+    explorerTab = new QWidget(this);
+    QHBoxLayout *explorerLayout = new QHBoxLayout(explorerTab);
+    mainSplitter = new QSplitter(Qt::Horizontal, this);
     explorerLayout->addWidget(mainSplitter);
-
+    
     // --- Left Panel (Tags) ---
     leftPanel = new QWidget(this);
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
-    leftLayout->addWidget(new QLabel("🏷️ 標籤庫 (Tags)"));
+    leftLayout->addWidget(new QLabel("標籤列表 (Tags)"));
     
     tagListWidget = new QListWidget(this);
     connect(tagListWidget, &QListWidget::itemClicked, this, &MainWindow::onTagSelected);
@@ -94,12 +91,12 @@ void MainWindow::setupLayout()
     
     // Left Panel Actions
     QHBoxLayout *leftActionLayout = new QHBoxLayout();
-    btnLeftAddTag = new QPushButton("➕", this);
+    btnLeftAddTag = new QPushButton("新增", this);
     btnLeftAddTag->setToolTip("新增標籤 (Add Tag)");
     connect(btnLeftAddTag, &QPushButton::clicked, this, &MainWindow::addTag);
     leftActionLayout->addWidget(btnLeftAddTag);
 
-    btnLeftRemoveTag = new QPushButton("➖", this);
+    btnLeftRemoveTag = new QPushButton("移除", this);
     btnLeftRemoveTag->setToolTip("移除標籤 (Global Delete Tag)");
     connect(btnLeftRemoveTag, &QPushButton::clicked, this, &MainWindow::removeGlobalTag);
     leftActionLayout->addWidget(btnLeftRemoveTag);
@@ -111,18 +108,24 @@ void MainWindow::setupLayout()
     // --- Middle Panel (Files) ---
     middlePanel = new QWidget(this);
     QVBoxLayout *midLayout = new QVBoxLayout(middlePanel);
-    midLayout->addWidget(new QLabel("📂 檔案列表 (Files)"));
+    midLayout->addWidget(new QLabel("檔案列表 (Files)"));
 
     txtSearch = new QLineEdit(this);
     txtSearch->setPlaceholderText("搜尋檔案... (Search)");
     connect(txtSearch, &QLineEdit::textChanged, this, &MainWindow::filterFiles);
     midLayout->addWidget(txtSearch);
 
-    fileList = new QListWidget(this);
-    fileList->setContextMenuPolicy(Qt::CustomContextMenu); // Enable context menu
-    connect(fileList, &QListWidget::itemClicked, this, &MainWindow::onFileSelected);
-    connect(fileList, &QListWidget::itemDoubleClicked, this, &MainWindow::openFile); // Double click to open
-    connect(fileList, &QListWidget::customContextMenuRequested, this, &MainWindow::showContextMenu); // Right click
+    fileList = new QTreeWidget(this);
+    fileList->setContextMenuPolicy(Qt::CustomContextMenu);
+    fileList->setHeaderHidden(true); 
+    fileList->setColumnCount(1);
+    
+    connect(fileList, &QTreeWidget::itemClicked, this, &MainWindow::onFileSelected);
+    connect(fileList, &QTreeWidget::itemDoubleClicked, this, &MainWindow::openFile); 
+    connect(fileList, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showContextMenu); 
+    // Connect Expansion Signal for Lazy Loading
+    connect(fileList, &QTreeWidget::itemExpanded, this, &MainWindow::onItemExpanded);
+
     midLayout->addWidget(fileList);
 
     mainSplitter->addWidget(middlePanel);
@@ -130,26 +133,26 @@ void MainWindow::setupLayout()
     // --- Right Panel (Details & Preview) ---
     rightPanel = new QWidget(this);
     QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
-    rightLayout->addWidget(new QLabel("👁️ 預覽與資訊 (Preview)"));
+    rightLayout->addWidget(new QLabel("檔案預覽 (Preview)"));
 
     // Preview Area
     QScrollArea *scrollArea = new QScrollArea(this);
     scrollArea->setBackgroundRole(QPalette::Dark);
-    scrollArea->setWidgetResizable(false); // Disable auto-resize to allow zoom
-    scrollArea->setAlignment(Qt::AlignCenter); // Center image when smaller than view
+    scrollArea->setWidgetResizable(false); 
+    scrollArea->setAlignment(Qt::AlignCenter); 
     
-    lblPreviewImage = new QLabel("選擇檔案以預覽 (Select file to preview)", this);
+    lblPreviewImage = new QLabel("請選擇檔案以預覽 (Select file to preview)", this);
     lblPreviewImage->setAlignment(Qt::AlignCenter);
-    lblPreviewImage->setScaledContents(true); // Allow pixmap scaling
+    lblPreviewImage->setScaledContents(true); 
     
     scrollArea->setWidget(lblPreviewImage);
     rightLayout->addWidget(scrollArea);
     
     // Zoom Controls
     QHBoxLayout *zoomLayout = new QHBoxLayout();
-    QPushButton *btnZoomIn = new QPushButton("➕ 放大", this);
-    QPushButton *btnZoomOut = new QPushButton("➖ 縮小", this);
-    QPushButton *btnFit = new QPushButton("↔ 適應視窗", this);
+    QPushButton *btnZoomIn = new QPushButton("放大", this);
+    QPushButton *btnZoomOut = new QPushButton("縮小", this);
+    QPushButton *btnFit = new QPushButton("適應視窗", this);
     
     connect(btnZoomIn, &QPushButton::clicked, this, &MainWindow::zoomIn);
     connect(btnZoomOut, &QPushButton::clicked, this, &MainWindow::zoomOut);
@@ -162,7 +165,7 @@ void MainWindow::setupLayout()
     
     txtPreviewText = new QTextEdit(this);
     txtPreviewText->setReadOnly(true);
-    txtPreviewText->setVisible(false); // Default hidden
+    txtPreviewText->setVisible(false); 
     rightLayout->addWidget(txtPreviewText);
 
     // Tags Section
@@ -173,48 +176,46 @@ void MainWindow::setupLayout()
 
     // Actions
     QHBoxLayout *actionLayout = new QHBoxLayout();
-    btnAnalyzeFile = new QPushButton("✨ 分析檔案 (Analyze)", this);
+    btnAnalyzeFile = new QPushButton("分析檔案 (Analyze)", this);
     connect(btnAnalyzeFile, &QPushButton::clicked, this, &MainWindow::analyzeFile);
     actionLayout->addWidget(btnAnalyzeFile);
 
-    btnSaveTags = new QPushButton("💾 儲存標籤 (Save)", this);
+    btnSaveTags = new QPushButton("儲存標籤 (Save)", this);
     connect(btnSaveTags, &QPushButton::clicked, this, &MainWindow::saveTags);
     btnSaveTags->setEnabled(false);
     actionLayout->addWidget(btnSaveTags);
 
     // Manual Tag Management
-    btnAddTag = new QPushButton("➕ 新增標籤 (Add)", this);
+    btnAddTag = new QPushButton("新增標籤 (Add)", this);
     connect(btnAddTag, &QPushButton::clicked, this, &MainWindow::addTag);
     actionLayout->addWidget(btnAddTag);
 
-    btnRemoveTag = new QPushButton("➖ 移除標籤 (Remove)", this);
+    btnRemoveTag = new QPushButton("移除標籤 (Remove)", this);
     connect(btnRemoveTag, &QPushButton::clicked, this, &MainWindow::removeTag);
     actionLayout->addWidget(btnRemoveTag);
 
     rightLayout->addLayout(actionLayout);
 
-    lblStatus = new QLabel("狀態: 就緒", this);
+    lblStatus = new QLabel("準備就緒", this);
     lblStatus->setWordWrap(true);
     rightLayout->addWidget(lblStatus);
 
     rightLayout->addStretch();
     mainSplitter->addWidget(rightPanel);
 
-    // Set initial sizes: 20% | 40% | 40%
-    // Set initial sizes: 10% | 20% | 70% (Prioritize Preview)
     mainSplitter->setStretchFactor(0, 1);
     mainSplitter->setStretchFactor(1, 2);
     mainSplitter->setStretchFactor(2, 7);
 
-    tabWidget->addTab(explorerTab, "📁 資料夾視圖 (Explorer)");
+    tabWidget->addTab(explorerTab, "檔案瀏覽器 (Explorer)");
 
     // === Tab 2: Graph View ===
     graphWidget = new GraphWidget(&tagManager, this);
-    tabWidget->addTab(graphWidget, "🕸️ 關聯視圖 (Graph)");
+    tabWidget->addTab(graphWidget, "關聯視圖 (Graph)");
 }
 
 void MainWindow::onTabChanged(int index) {
-    if (index == 1) { // Graph Tab
+    if (index == 1) { 
         graphWidget->buildGraph();
     }
 }
@@ -228,7 +229,7 @@ void MainWindow::openFolder()
 
     if (!dir.isEmpty()) {
         currentPath = dir;
-        dirWatcher.addPath(currentPath); // Start Monitoring
+        dirWatcher.addPath(currentPath); 
         tagManager.loadTags(currentPath.toStdString());
         scanFiles();
     }
@@ -237,19 +238,72 @@ void MainWindow::openFolder()
 void MainWindow::scanFiles()
 {
     fileList->clear();
-    FileScanner scanner;
-    bool recursive = chkRecursive->isChecked();
-    std::vector<std::string> files = scanner.scanDirectory(currentPath.toStdString(), recursive);
+    if (currentPath.isEmpty()) return;
 
-    for (const auto& file : files) {
-        std::filesystem::path p(file);
-        QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(p.filename().string()));
-        item->setData(Qt::UserRole, QString::fromStdString(file)); // Store full relative path
-        fileList->addItem(item);
+    FileScanner scanner;
+    // CRITICAL: Force non-recursive for UI to allow Lazy Loading.
+    // Recursive scanning whole drive freezes UI.
+    // We only scan top-level here.
+    bool recur = false; 
+    
+    std::vector<std::string> entries = scanner.scanDirectory(currentPath.toStdString(), recur);
+
+    for (const auto& entry : entries) {
+        std::filesystem::path p(entry);
+        QString filename = QString::fromStdString(p.filename().string());
+        QString fullPath = QString::fromStdString(entry);
+
+        QTreeWidgetItem* item = new QTreeWidgetItem(fileList);
+        item->setText(0, filename);
+        
+        if (std::filesystem::is_directory(p)) {
+            item->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
+            item->setData(0, Qt::UserRole, fullPath); 
+            // Add Dummy Child for expansion
+            new QTreeWidgetItem(item); 
+        } else {
+            item->setIcon(0, style()->standardIcon(QStyle::SP_FileIcon));
+            item->setData(0, Qt::UserRole, fullPath); 
+        }
     }
     
+    fileList->sortItems(0, Qt::AscendingOrder);
     updateTagList();
-    lblStatus->setText(QString("目前資料夾: %1 (找到 %2 個檔案)").arg(currentPath).arg(files.size()));
+    lblStatus->setText(QString("已載入 %1 (項目數: %2)").arg(currentPath).arg(entries.size()));
+}
+
+void MainWindow::onItemExpanded(QTreeWidgetItem *item)
+{
+    // Lazy Load Children
+    if (item->childCount() == 1 && item->child(0)->text(0).isEmpty()) {
+        // It has a dummy child. Remove it.
+        delete item->takeChild(0);
+        
+        QString path = item->data(0, Qt::UserRole).toString();
+        FileScanner scanner;
+        // Scan sub-folder (Non-recursive)
+        std::vector<std::string> entries = scanner.scanDirectory(path.toStdString(), false);
+        
+        for (const auto& entry : entries) {
+            std::filesystem::path p(entry);
+            QString filename = QString::fromStdString(p.filename().string());
+            QString fullPath = QString::fromStdString(entry);
+            
+            QTreeWidgetItem* child = new QTreeWidgetItem(item);
+            child->setText(0, filename);
+            
+            if (std::filesystem::is_directory(p)) {
+                child->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
+                child->setData(0, Qt::UserRole, fullPath);
+                new QTreeWidgetItem(child); // Dummy
+            } else {
+                child->setIcon(0, style()->standardIcon(QStyle::SP_FileIcon));
+                child->setData(0, Qt::UserRole, fullPath);
+            }
+        }
+        
+       item->sortChildren(0, Qt::AscendingOrder);
+    }
 }
 
 void MainWindow::updateTagList()
@@ -257,7 +311,6 @@ void MainWindow::updateTagList()
     tagListWidget->clear();
     std::vector<std::string> tags = tagManager.getAllTags();
     
-    // Always add an "All Files" option
     QListWidgetItem* allItem = new QListWidgetItem("All Files");
     allItem->setData(Qt::UserRole, "ALL");
     tagListWidget->addItem(allItem);
@@ -269,451 +322,302 @@ void MainWindow::updateTagList()
 
 void MainWindow::onTagSelected(QListWidgetItem *item)
 {
+    // Simplified filtering logic for now
     QString tag = item->text();
     QString data = item->data(Qt::UserRole).toString();
+
+    // Note: filtering in Lazy Loaded tree is complex because items might not be loaded.
+    // For now, this only filters *loaded* items.
     
-    if (data == "ALL") {
-        // Show all files
-        for(int i=0; i<fileList->count(); ++i) {
-            fileList->item(i)->setHidden(false);
+    QTreeWidgetItemIterator it(fileList);
+    while (*it) {
+        if (data == "ALL") {
+            (*it)->setHidden(false);
+        } else {
+            QString path = (*it)->data(0, Qt::UserRole).toString();
+            if (path.isEmpty()) {
+                 // Folder logic
+            } else {
+                std::filesystem::path p(path.toStdString());
+                std::string filename = p.filename().string();
+                
+                std::vector<std::string> filesWithTag = tagManager.getFilesByTag(tag.toStdString());
+                std::set<std::string> fileSet(filesWithTag.begin(), filesWithTag.end());
+                
+                bool match = (fileSet.find(filename) != fileSet.end());
+                (*it)->setHidden(!match);
+                
+                if (match) {
+                    QTreeWidgetItem* parent = (*it)->parent();
+                    while(parent) {
+                        parent->setHidden(false);
+                        parent->setExpanded(true);
+                        parent = parent->parent();
+                    }
+                }
+            }
         }
-    } else {
-        // Filter by tag
-        std::vector<std::string> filesWithTag = tagManager.getFilesByTag(tag.toStdString());
-        std::set<std::string> fileSet(filesWithTag.begin(), filesWithTag.end());
-        
-        for(int i=0; i<fileList->count(); ++i) {
-            QListWidgetItem *fItem = fileList->item(i);
-            QString fname = fItem->text(); 
-            
-            // Check if this file is in the tag set
-            std::filesystem::path p(fname.toStdString());
-            std::string filenameOnly = p.filename().string();
-            
-            fItem->setHidden(fileSet.find(filenameOnly) == fileSet.end());
+        ++it;
+    }
+}
+
+void MainWindow::onFileSelected(QTreeWidgetItem *item, int column)
+{
+    QString filePath = item->data(0, Qt::UserRole).toString();
+    if (filePath.isEmpty()) return; 
+    
+    std::filesystem::path p(filePath.toStdString());
+    if (std::filesystem::is_directory(p)) return; // Don't preview folders
+
+    updateFilePreview(filePath);
+    updateTagDisplay(QString::fromStdString(p.filename().string()));
+}
+
+void MainWindow::openFile(QTreeWidgetItem* item, int column)
+{
+    QString filePath = item->data(0, Qt::UserRole).toString();
+    if (!filePath.isEmpty()) {
+        std::filesystem::path p(filePath.toStdString());
+        if (!std::filesystem::is_directory(p)) {
+             QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
         }
     }
 }
 
-void MainWindow::loadModel()
+void MainWindow::showContextMenu(const QPoint &pos)
 {
-    QString fileName = QFileDialog::getOpenFileName(this, "載入模型 (Load Model)",
-                                                    QString(),
-                                                    "GGUF Models (*.gguf);;All Files (*)");
+    QTreeWidgetItem *item = fileList->itemAt(pos);
+    if (!item) return;
+    
+    // Allow context menu on files
+    QString path = item->data(0, Qt::UserRole).toString();
+    if (path.isEmpty()) return;
+     
+    // Check if file
+    if (std::filesystem::is_directory(path.toStdString())) return;
 
-    if (!fileName.isEmpty()) {
-        lblStatus->setText("正在載入模型... (Loading Model...)");
-        QApplication::processEvents(); // Force update UI
+    QMenu contextMenu(tr("Context Menu"), this);
 
-        if (llamaEngine.loadModel(fileName.toStdString())) {
-            lblStatus->setText("模型載入成功! (Model loaded!)");
-            QMessageBox::information(this, "Success", "模型載入成功！");
-        } else {
-            lblStatus->setText("模型載入失敗 (Failed to load model)");
-            QMessageBox::critical(this, "Error", "模型載入失敗 (Failed to load model)");
-        }
-    }
+    QAction *actRename = new QAction(tr("更名 (Rename)"), this);
+    connect(actRename, &QAction::triggered, this, &MainWindow::renameFile);
+    contextMenu.addAction(actRename);
+
+    QAction *actDelete = new QAction(tr("刪除 (Delete)"), this);
+    connect(actDelete, &QAction::triggered, this, &MainWindow::deleteFile);
+    contextMenu.addAction(actDelete);
+    
+    contextMenu.addSeparator();
+    
+    QAction *actAnaly = new QAction("AI 分析 (Analyze)", this);
+    connect(actAnaly, &QAction::triggered, this, &MainWindow::analyzeFile);
+    contextMenu.addAction(actAnaly);
+
+    QAction *actEmbed = new QAction("建立向量 (Generate Embedding)", this);
+    connect(actEmbed, &QAction::triggered, this, &MainWindow::onGenerateEmbedding);
+    contextMenu.addAction(actEmbed);
+
+    QAction *actSim = new QAction("尋找相似 (Find Similar)", this);
+    connect(actSim, &QAction::triggered, this, &MainWindow::onFindSimilar);
+    contextMenu.addAction(actSim);
+
+    contextMenu.exec(fileList->mapToGlobal(pos));
 }
 
 void MainWindow::analyzeFile()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
-    if (selectedItems.isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please select a file first.");
+    if (fileList->selectedItems().isEmpty()) return;
+    QString filePath = fileList->selectedItems().first()->data(0, Qt::UserRole).toString();
+    
+    if (std::filesystem::is_directory(filePath.toStdString())) return;
+
+    lblStatus->setText("Reading file...");
+    QApplication::processEvents();
+    
+    std::string content = DocumentParser::extractText(filePath.toStdString());
+    if (content.empty()) {
+        txtPreviewText->setText("(No text content found)");
         return;
     }
 
-    QString relPath = selectedItems.first()->data(Qt::UserRole).toString();
-    QString filename = selectedItems.first()->text();
-
-    std::filesystem::path path(currentPath.toStdString());
-    path /= relPath.toStdString();
-    QString filePath = QString::fromStdString(path.string());
-    
-    std::string content = "";
-    std::string ext = path.extension().string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    
-    static const std::set<std::string> textExts = {
-        ".txt", ".md", ".log", ".tex", ".rtf",
-        ".cpp", ".h", ".c", ".hpp", ".cs", ".java", ".py", ".js", ".ts", 
-        ".html", ".css", ".json", ".xml", ".yaml", ".yml", ".ini", ".conf", ".env",
-        ".bat", ".sh", ".ps1", ".go", ".rs", ".lua", ".sql", ".php"
-    };
-
-    if (textExts.count(ext)) {
-        try {
-            std::ifstream f(filePath.toStdString());
-            if (f.is_open()) {
-                std::stringstream buffer;
-                buffer << f.rdbuf(); // Read full content
-                content = buffer.str();
-                lblStatus->setText(QString("正在分析檔案內容... (%1 chars)").arg(content.length()));
-            }
-        } catch (...) {}
-    } 
-    else if (ext == ".docx" || ext == ".xlsx" || ext == ".pptx" || 
-             ext == ".odt" || ext == ".odf" || 
-             ext == ".html" || ext == ".htm" || ext == ".shtml" || ext == ".xhtml") {
-        lblStatus->setText(QString("正在解析文件內容: %1").arg(filename));
-        content = DocumentParser::extractText(filePath.toStdString());
-    }
-    else {
-        lblStatus->setText("正在分析檔名...");
+    if (!llamaEngine.isModelLoaded()) {
+        QMessageBox::warning(this, "Error", "Model not loaded. Please Open Folder containing GGUF model first, or use 'Load Model'."); // Simplified check
+        return;
     }
 
-    // Unified safety truncation (16000 chars)
-    if (content.length() > 16000) {
-        content = content.substr(0, 16000) + "... [Truncated]";
-    }
-
-    btnAnalyzeFile->setEnabled(false);
-    btnSaveTags->setEnabled(false);
-    fileList->setEnabled(false);
+    lblStatus->setText("Analyzing with AI...");
     
-    QFuture<std::string> future = QtConcurrent::run([this, filename, content]() {
-        return llamaEngine.suggestTags(filename.toStdString(), content);
+    std::string filenameStr = std::filesystem::path(filePath.toStdString()).filename().string();
+    
+    QFuture<std::string> future = QtConcurrent::run(QThreadPool::globalInstance(), [this, filenameStr, content]() -> std::string {
+        return llamaEngine.suggestTags(filenameStr, content);
     });
-
     watcher->setFuture(future);
 }
 
 void MainWindow::onAnalysisFinished()
 {
     std::string result = watcher->result();
-    
-    // Re-enable UI
-    btnAnalyzeFile->setEnabled(true);
-    fileList->setEnabled(true);
-
-    if (result.rfind("Error:", 0) == 0) { // Starts with "Error:"
-        lblStatus->setText("分析失敗 (Analysis Failed)");
-        QMessageBox::critical(this, "Analysis Error", QString::fromStdString(result));
-        return;
-    }
-
-    lblStatus->setText("分析完成 (Analysis complete)");
-    
-    // Auto-save tags
-    btnSaveTags->setProperty("pendingTags", QString::fromStdString(result));
-    saveTags(); // Automatically save
-    
-    // Update UI to show success
-    lblTags->setText("標籤: " + QString::fromStdString(result));
-    QMessageBox::information(this, "Analysis Finished", "分析完成並已自動儲存標籤！\n(Analysis complete and tags saved!)");
-}
-
-void MainWindow::onFileSelected(QListWidgetItem *item)
-{
-    QString filePathStr = item->text();
-    // Resolve full path if item text is relative
-    std::filesystem::path p(currentPath.toStdString());
-    p /= filePathStr.toStdString();
-    
-    updateTagDisplay(QString::fromStdString(p.filename().string()));
-    updateFilePreview(QString::fromStdString(p.string()));
-    btnSaveTags->setEnabled(false);
-}
-
-void MainWindow::updateFilePreview(const QString& filePath)
-{
-    std::filesystem::path p(filePath.toStdString());
-    std::string ext = p.extension().string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    
-    // Hide all first
-    lblPreviewImage->setVisible(false);
-    txtPreviewText->setVisible(false);
-
-    if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp") {
-        QPixmap pixmap(filePath);
-        if (!pixmap.isNull()) {
-            currentPreviewPixmap = pixmap;
-            lblPreviewImage->setVisible(true);
-            fitToWindow(); // Default to fit
-        } else {
-            lblPreviewImage->setText("無法載入圖片 (Image Load Failed)");
-            lblPreviewImage->setVisible(true);
-            currentPreviewPixmap = QPixmap();
-        }
-    } else if (ext == ".docx" || ext == ".xlsx" || ext == ".pptx" || 
-               ext == ".odt" || ext == ".odf" || 
-               ext == ".html" || ext == ".htm" || ext == ".shtml" || ext == ".xhtml" || 
-               ext == ".pdf") {
-        txtPreviewText->setVisible(true);
-        std::string content = DocumentParser::extractText(filePath.toStdString());
-        if (content.empty()) content = "(No searchable text found or encrypted)";
-        txtPreviewText->setText(QString::fromStdString(content));
-    } else {
-        // Text preview
-        txtPreviewText->setVisible(true);
-        std::ifstream f(filePath.toStdString());
-        if (f.is_open()) {
-             char buffer[2048];
-             f.read(buffer, 2047);
-             buffer[f.gcount()] = '\0';
-             txtPreviewText->setText(QString::fromUtf8(buffer));
-        } else {
-             txtPreviewText->setText("(無法讀取檔案內容)");
-        }
-    }
-}
-
-void MainWindow::updateTagDisplay(const QString& filePath)
-{
-    std::filesystem::path path(filePath.toStdString());
-    std::string filename = path.filename().string();
-    std::vector<std::string> tags = tagManager.getTags(filename);
-    
-    QString tagStr = "標籤: ";
-    if (tags.empty()) {
-        tagStr += "(無)";
-    } else {
-        for (size_t i = 0; i < tags.size(); ++i) {
-            tagStr += QString::fromStdString(tags[i]);
-            if (i < tags.size() - 1) tagStr += ", ";
-        }
-    }
-    lblTags->setText(tagStr);
+    lblStatus->setText("Analysis Complete");
+    QMessageBox::information(this, "AI Analysis", QString::fromStdString(result));
 }
 
 void MainWindow::saveTags()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
-    if (selectedItems.isEmpty()) return;
-
-    QString relPath = selectedItems.first()->data(Qt::UserRole).toString();
-
-    std::filesystem::path path(currentPath.toStdString());
-    path /= relPath.toStdString();
-    
-    QString filePath = QString::fromStdString(path.string());
-    std::string filename = path.filename().string();
-    
-    QString pendingTags = btnSaveTags->property("pendingTags").toString();
-    if (pendingTags.isEmpty()) return;
-    
-    // Simple parsing of comma-separated tags
-    QStringList tagList = pendingTags.split(',', Qt::SkipEmptyParts);
-    std::vector<std::string> newTags;
-    for (const QString& t : tagList) {
-        newTags.push_back(t.trimmed().toStdString());
-    }
-    
-    tagManager.setTags(filename, newTags);
-    updateTagDisplay(filePath);
-    updateTagList(); // Refresh left panel to show new tags immediately
-    
-    lblStatus->setText("標籤已儲存 (Tags saved)");
+    tagManager.saveTags();
     btnSaveTags->setEnabled(false);
-}
-
-void MainWindow::filterFiles(const QString &text)
-{
-    QString query = text.trimmed().toLower();
-    
-    for (int i = 0; i < fileList->count(); ++i) {
-        QListWidgetItem *item = fileList->item(i);
-        QString filePath = item->text();
-        std::filesystem::path path(filePath.toStdString());
-        QString filename = QString::fromStdString(path.filename().string()).toLower();
-        
-        bool match = false;
-        
-        // 1. Check filename
-        if (filename.contains(query)) {
-            match = true;
-        } else {
-            // 2. Check tags
-            std::vector<std::string> tags = tagManager.getTags(path.filename().string());
-            for (const auto& tag : tags) {
-                if (QString::fromStdString(tag).toLower().contains(query)) {
-                    match = true;
-                    break;
-                }
-            }
-        }
-        
-        item->setHidden(!match);
-    }
+    lblStatus->setText("Tags Saved");
 }
 
 void MainWindow::addTag()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
-    if (selectedItems.isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please select a file first.");
-        return;
-    }
-
-    QString filename = selectedItems.first()->text();
-    std::filesystem::path path(filename.toStdString());
-    std::string fnameOnly = path.filename().string();
-
-    QInputDialog dialog(this);
-    dialog.setWindowTitle("Add Tag");
-    dialog.setLabelText("New Tag Name:");
-    dialog.setTextValue("");
-    dialog.setInputMode(QInputDialog::TextInput);
-    dialog.resize(300, 150); // Optimize size
-
-    if (dialog.exec() == QDialog::Accepted) {
-        QString text = dialog.textValue();
-        if (!text.isEmpty()) {
-            tagManager.addTag(fnameOnly, text.toStdString());
-            updateTagDisplay(filename);
-            updateTagList(); // Refresh left panel
-            lblStatus->setText(QString("已新增標籤: %1").arg(text));
-        }
+    if (fileList->selectedItems().isEmpty()) return;
+    QString filePath = fileList->selectedItems().first()->data(0, Qt::UserRole).toString();
+    std::filesystem::path p(filePath.toStdString());
+    std::string filename = p.filename().string();
+    
+    bool ok;
+    QString text = QInputDialog::getText(this, tr("Add Tag"),
+                                         tr("Tag Name:"), QLineEdit::Normal,
+                                         "", &ok);
+    if (ok && !text.isEmpty()) {
+        tagManager.addTag(filename, text.toStdString());
+        updateTagDisplay(QString::fromStdString(filename));
+        updateTagList();
+        btnSaveTags->setEnabled(true);
     }
 }
 
 void MainWindow::removeTag()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
-    if (selectedItems.isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please select a file first.");
-        return;
-    }
-
-    QString filename = selectedItems.first()->text();
-    std::filesystem::path path(filename.toStdString());
-    std::string fnameOnly = path.filename().string();
-
-    std::vector<std::string> tags = tagManager.getTags(fnameOnly);
-    if (tags.empty()) {
-        QMessageBox::information(this, "Info", "This file has no tags.");
-        return;
-    }
-
+    if (fileList->selectedItems().isEmpty()) return;
+    QString filePath = fileList->selectedItems().first()->data(0, Qt::UserRole).toString();
+    std::filesystem::path p(filePath.toStdString());
+    std::string filename = p.filename().string();
+    
+    std::vector<std::string> tags = tagManager.getTags(filename);
+    if (tags.empty()) return;
+    
     QStringList items;
-    for (const auto& t : tags) items << QString::fromStdString(t);
-
-    QInputDialog dialog(this);
-    dialog.setWindowTitle("Remove Tag");
-    dialog.setLabelText("Select tag to remove:");
-    dialog.setComboBoxItems(items);
-    dialog.setInputMode(QInputDialog::TextInput); // ComboBox uses TextInput mode with items
-    dialog.setComboBoxEditable(false);
-    dialog.resize(300, 150); // Optimize size
-
-    if (dialog.exec() == QDialog::Accepted) {
-        QString item = dialog.textValue();
-        if (!item.isEmpty()) {
-            tagManager.removeTag(fnameOnly, item.toStdString());
-            updateTagDisplay(filename);
-            updateTagList(); // Refresh left panel
-            lblStatus->setText(QString("已移除標籤: %1").arg(item));
-        }
+    for(const auto& t : tags) items << QString::fromStdString(t);
+    
+    bool ok;
+    QString item = QInputDialog::getItem(this, tr("Remove Tag"), tr("Select Tag:"), items, 0, false, &ok);
+    
+    if (ok && !item.isEmpty()) {
+        tagManager.removeTag(filename, item.toStdString());
+        updateTagDisplay(QString::fromStdString(filename));
+        updateTagList();
+        btnSaveTags->setEnabled(true);
     }
 }
-
 
 void MainWindow::removeGlobalTag()
 {
-    QList<QListWidgetItem*> selectedItems = tagListWidget->selectedItems();
-    if (selectedItems.isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please select a tag from the left list first.");
-        return;
-    }
+     if (tagListWidget->selectedItems().isEmpty()) return;
+     QString tag = tagListWidget->selectedItems().first()->text();
+     
+     if (tag == "All Files") return;
 
-    QString tag = selectedItems.first()->text();
-    QString data = selectedItems.first()->data(Qt::UserRole).toString();
+     QMessageBox::StandardButton reply;
+     reply = QMessageBox::question(this, "Delete Tag", 
+                                   QString("Are you sure you want to delete tag '%1' from ALL files?").arg(tag),
+                                   QMessageBox::Yes|QMessageBox::No);
+     if (reply == QMessageBox::Yes) {
+         tagManager.deleteTag(tag.toStdString());
+         updateTagList();
+         if (!fileList->selectedItems().isEmpty()) {
+             QString filePath = fileList->selectedItems().first()->data(0, Qt::UserRole).toString();
+             std::filesystem::path p(filePath.toStdString());
+             updateTagDisplay(QString::fromStdString(p.filename().string()));
+         }
+     }
+}
 
-    if (data == "ALL") {
-        QMessageBox::warning(this, "Warning", "Cannot delete 'All Files' category.");
-        return;
-    }
-
-    QMessageBox::StandardButton reply;
-    reply = QMessageBox::question(this, "Delete Tag", 
-                                  QString("Are you sure you want to delete tag '%1' from ALL files?").arg(tag),
-                                  QMessageBox::Yes|QMessageBox::No);
-    
-    if (reply == QMessageBox::Yes) {
-        tagManager.deleteTag(tag.toStdString());
-        updateTagList();
+void MainWindow::filterFiles(const QString &text)
+{
+    QTreeWidgetItemIterator it(fileList);
+    while (*it) {
+        QString itemText = (*it)->text(0);
+        bool match = itemText.contains(text, Qt::CaseInsensitive);
+        (*it)->setHidden(!match);
         
-        // Refresh right panel if a file is selected
-        QList<QListWidgetItem*> selectedFiles = fileList->selectedItems();
-        if (!selectedFiles.isEmpty()) {
-            updateTagDisplay(selectedFiles.first()->text());
+        if (match) {
+             QTreeWidgetItem* parent = (*it)->parent();
+             while(parent) {
+                 parent->setHidden(false);
+                 parent->setExpanded(true);
+                 parent = parent->parent();
+             }
         }
-        
-        lblStatus->setText(QString("已刪除標籤: %1 (Global)").arg(tag));
+        ++it;
     }
 }
 
-void MainWindow::openFile(QListWidgetItem* item)
+void MainWindow::updateFilePreview(const QString& filePath)
 {
-    if (!item) return;
-    QString relPath = item->data(Qt::UserRole).toString();
-    std::filesystem::path path(currentPath.toStdString());
-    path /= relPath.toStdString();
+    QFileInfo fi(filePath);
+    QString ext = fi.suffix().toLower();
     
-    QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdString(path.string())));
+    lblPreviewImage->clear();
+    currentPreviewPixmap = QPixmap();
+    txtPreviewText->setVisible(false);
+    scrollArea->setVisible(true); 
+
+    if (QStringList{"png", "jpg", "jpeg", "bmp", "gif"}.contains(ext)) {
+        QPixmap pix(filePath);
+        if (!pix.isNull()) {
+            currentPreviewPixmap = pix;
+            scaleFactor = 1.0;
+            updateImageDisplay();
+            txtPreviewText->setVisible(false);
+        } else {
+            lblPreviewImage->setText("無法預覽圖片 (Invalid Image)");
+        }
+    } else {
+        lblPreviewImage->setText("載入中..."); 
+        txtPreviewText->setVisible(true);
+        std::string content = DocumentParser::extractText(filePath.toStdString());
+        txtPreviewText->setText(QString::fromStdString(content));
+        lblPreviewImage->clear();
+    }
 }
 
-void MainWindow::showContextMenu(const QPoint &pos)
+void MainWindow::updateTagDisplay(const QString& filename)
 {
-    QListWidgetItem *item = fileList->itemAt(pos);
-    if (!item) return;
-
-    QMenu contextMenu(tr("Context menu"), this);
-
-    QAction actionOpen("開啟 (Open)", this);
-    connect(&actionOpen, &QAction::triggered, [this, item](){ openFile(item); });
-    contextMenu.addAction(&actionOpen);
-
-    QAction actionRename("重新命名 (Rename)", this);
-    connect(&actionRename, &QAction::triggered, this, &MainWindow::renameFile);
-    contextMenu.addAction(&actionRename);
-
-    QAction actionDelete("刪除 (Delete)", this);
-    connect(&actionDelete, &QAction::triggered, this, &MainWindow::deleteFile);
-    contextMenu.addAction(&actionDelete);
-
+    std::vector<std::string> tags = tagManager.getTags(filename.toStdString());
+    QString tagStr = "標籤: ";
+    for (const auto& t : tags) {
+        tagStr += QString::fromStdString(t) + ", ";
+    }
+    if (tags.empty()) tagStr += "--";
+    else tagStr.chop(2); 
     
-    contextMenu.addSeparator();
-    QAction *genVectorAction = contextMenu.addAction("Generate Embedding");
-    QAction *findSimilarAction = contextMenu.addAction("Find Similar");
-
-    connect(genVectorAction, &QAction::triggered, this, &MainWindow::onGenerateEmbedding);
-    connect(findSimilarAction, &QAction::triggered, this, &MainWindow::onFindSimilar);
-
-    contextMenu.exec(fileList->mapToGlobal(pos));
+    lblTags->setText(tagStr);
 }
 
 void MainWindow::renameFile()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
+    QList<QTreeWidgetItem*> selectedItems = fileList->selectedItems();
     if (selectedItems.isEmpty()) return;
     
-    QString oldName = selectedItems.first()->text();
-    QString relPath = selectedItems.first()->data(Qt::UserRole).toString();
+    if (selectedItems.first()->data(0, Qt::UserRole).toString().isEmpty()) return;
+
+    QString oldName = selectedItems.first()->text(0);
+    QString fullPath = selectedItems.first()->data(0, Qt::UserRole).toString();
     
     bool ok;
     QString newName = QInputDialog::getText(this, tr("Rename File"),
                                             tr("New name:"), QLineEdit::Normal,
                                             oldName, &ok);
     if (ok && !newName.isEmpty() && newName != oldName) {
-        std::filesystem::path oldFull(currentPath.toStdString());
-        oldFull /= relPath.toStdString();
+        std::filesystem::path oldFull(fullPath.toStdString());
+        std::filesystem::path newFull = oldFull.parent_path() / newName.toStdString();
         
-        // Calculate new relative path
-        std::filesystem::path p(relPath.toStdString());
-        p.replace_filename(newName.toStdString());
-        
-        std::filesystem::path newFull(currentPath.toStdString());
-        newFull /= p;
-
         try {
             std::filesystem::rename(oldFull, newFull);
-            // Update Tag Manager (Using filenames as keys)
             tagManager.renameFile(oldName.toStdString(), newName.toStdString());
-            // Refresh UI
             scanFiles(); 
-            lblStatus->setText(QString("已更名: %1 -> %2").arg(oldName).arg(newName));
+            lblStatus->setText(QString("已更名 %1 -> %2").arg(oldName).arg(newName));
         } catch (const std::filesystem::filesystem_error& e) {
              QMessageBox::critical(this, "Error", QString("Rename failed: %1").arg(e.what()));
         }
@@ -722,34 +626,30 @@ void MainWindow::renameFile()
 
 void MainWindow::deleteFile()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
+    QList<QTreeWidgetItem*> selectedItems = fileList->selectedItems();
     if (selectedItems.isEmpty()) return;
     
-    QString filename = selectedItems.first()->text();
-    QString relPath = selectedItems.first()->data(Qt::UserRole).toString();
+    if (selectedItems.first()->data(0, Qt::UserRole).toString().isEmpty()) return;
+
+    QString filename = selectedItems.first()->text(0);
+    QString fullPath = selectedItems.first()->data(0, Qt::UserRole).toString();
     
     QMessageBox::StandardButton reply;
     reply = QMessageBox::question(this, "Delete File", 
-                                  QString("確定要刪除檔案 '%1' 嗎?\n(此動作無法復原)").arg(filename),
+                                  QString("確定要刪除 '%1' 嗎?\n(此動作無法復原)").arg(filename),
                                   QMessageBox::Yes|QMessageBox::No);
     
     if (reply == QMessageBox::Yes) {
-        std::filesystem::path path(currentPath.toStdString());
-        path /= relPath.toStdString();
-        
+        std::filesystem::path path(fullPath.toStdString());
         try {
             if (std::filesystem::remove(path)) {
-                // Update Tag Manager (Using filename as key)
                 tagManager.removeFile(filename.toStdString());
-                // Refresh UI
                 scanFiles();
-                // Clear Preview
                 txtPreviewText->clear();
                 lblPreviewImage->setText("已刪除 (Deleted)");
-                currentPreviewPixmap = QPixmap(); // Clear image
+                currentPreviewPixmap = QPixmap();
                 lblTags->setText("標籤: --");
-                
-                lblStatus->setText(QString("已刪除: %1").arg(filename));
+                lblStatus->setText(QString("已刪除 %1").arg(filename));
             } else {
                  QMessageBox::critical(this, "Error", "刪除失敗 (Delete failed). File may be in use.");
             }
@@ -761,9 +661,6 @@ void MainWindow::deleteFile()
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    // No longer strictly needed for resize as fitToWindow handles it, 
-    // but useful if "Fit to Window" is active mode. 
-    // For now we rely on explicit buttons or auto-fit on load.
     return QMainWindow::eventFilter(watched, event);
 }
 
@@ -771,9 +668,6 @@ void MainWindow::updateImageDisplay() {
     if (currentPreviewPixmap.isNull()) return;
 
     QSize newSize = currentPreviewPixmap.size() * scaleFactor;
-    
-    // For ScrollArea to work with ScaledContents:
-    // We resize the LABEL.
     lblPreviewImage->resize(newSize);
     lblPreviewImage->setPixmap(currentPreviewPixmap);
 }
@@ -791,48 +685,36 @@ void MainWindow::zoomOut() {
 void MainWindow::fitToWindow() {
     if (currentPreviewPixmap.isNull()) return;
     
-    // Find parent scroll area
-    QScrollArea* sa = qobject_cast<QScrollArea*>(lblPreviewImage->parent()->parent());
-    // Note: scrollArea->setWidget(label) reparents label to scrollArea's viewport's widget?
-    // Actually simpler: we added scrollArea as local var in setup, let's find it or assuming label's parent
-    // Actually, just calculating based on available space is hard without member pointer to scrollArea.
-    // Let's assume arbitrary fit or fix 'scrollArea' visibility in Header.
-    // Hack: Just set scaleFactor to 1.0 (Original) or estimate.
-    
-    // Better: "Fit to Window" means scaling image to fit the label's *visible* area?
-    // With ScrollArea, "Fit" usually means matching the ScrollArea viewport size.
-    
     QWidget *view = lblPreviewImage->parentWidget();
     if (view) {
         QSize viewSize = view->size();
         double wRatio = (double)viewSize.width() / currentPreviewPixmap.width();
         double hRatio = (double)viewSize.height() / currentPreviewPixmap.height();
-        scaleFactor = std::min(wRatio, hRatio) * 0.95; // 95% to avoid scrollbars
+        scaleFactor = std::min(wRatio, hRatio) * 0.95; 
         updateImageDisplay();
     }
 }
 
 void MainWindow::onMoniFileAdded(const QString &path)
 {
-    lblStatus->setText("������s�ɮ�: " + path);
-    scanFiles(); // Refresh list
+    lblStatus->setText("新檔案: " + path);
+    scanFiles(); 
 }
 
 void MainWindow::onMoniFileDeleted(const QString &path)
 {
-    lblStatus->setText("�������ɮקR��: " + path);
-    scanFiles(); // Refresh list
+    lblStatus->setText("檔案刪除: " + path);
+    scanFiles(); 
 }
-
-
 
 void MainWindow::onGenerateEmbedding()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
+    QList<QTreeWidgetItem*> selectedItems = fileList->selectedItems();
     if (selectedItems.isEmpty()) return;
 
-    QString filePath = selectedItems.first()->data(Qt::UserRole).toString();
-    
+    QString filePath = selectedItems.first()->data(0, Qt::UserRole).toString();
+    if (filePath.isEmpty()) return; 
+
     lblStatus->setText("Reading Content...");
     QApplication::processEvents();
     
@@ -873,10 +755,12 @@ void MainWindow::onGenerateEmbedding()
 
 void MainWindow::onFindSimilar()
 {
-    QList<QListWidgetItem*> selectedItems = fileList->selectedItems();
+    QList<QTreeWidgetItem*> selectedItems = fileList->selectedItems();
     if (selectedItems.isEmpty()) return;
 
-    QString filePath = selectedItems.first()->data(Qt::UserRole).toString();
+    QString filePath = selectedItems.first()->data(0, Qt::UserRole).toString();
+    if (filePath.isEmpty()) return; 
+
     auto& db = DatabaseManager::instance();
     int fileId = db.getFileId(filePath);
 
@@ -904,4 +788,27 @@ void MainWindow::onFindSimilar()
     }
     
     QMessageBox::information(this, "Similarity Result", resultMsg);
+}
+
+QTreeWidgetItem* MainWindow::findOrCreateParent(const QString& path, std::map<QString, QTreeWidgetItem*>& nodeMap) {
+    return nullptr; 
+}
+
+void MainWindow::loadModel()
+{
+    QString fileName = QFileDialog::getOpenFileName(this, "Load Model (GGUF)",
+                                                    QString(),
+                                                    "GGUF Models (*.gguf);;All Files (*.*)");
+    if (!fileName.isEmpty()) {
+        lblStatus->setText("Loading Model...");
+        QApplication::processEvents();
+        
+        if (llamaEngine.loadModel(fileName.toStdString())) {
+             lblStatus->setText("Model Loaded: " + fileName);
+             QMessageBox::information(this, "Info", "Model Loaded Successfully");
+        } else {
+             lblStatus->setText("Load Failed");
+             QMessageBox::critical(this, "Error", "Failed to load model");
+        }
+    }
 }

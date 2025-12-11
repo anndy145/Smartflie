@@ -26,7 +26,7 @@ std::vector<std::string> FileScanner::scanDirectory(const std::string& path, boo
                     continue;
                 }
 
-                if (it->is_regular_file()) {
+                if (it->is_regular_file() || it->is_directory()) {
                     files.push_back(it->path().string());
                 }
             }
@@ -34,7 +34,7 @@ std::vector<std::string> FileScanner::scanDirectory(const std::string& path, boo
             for (const auto& entry : fs::directory_iterator(path, fs::directory_options::skip_permission_denied)) {
                 if (isIgnored(entry.path())) continue;
                 
-                if (entry.is_regular_file()) {
+                if (entry.is_regular_file() || entry.is_directory()) {
                     files.push_back(entry.path().string());
                 }
             }
