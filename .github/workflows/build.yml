@@ -4,6 +4,8 @@ on:
   workflow_dispatch: # allows manual triggering
 
   push:
+    branches:
+      - main
     tags:
       - "v[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+"
@@ -62,6 +64,10 @@ jobs:
           if [[ ${{ matrix.build }} == "windows_x64" ]]; then
             # Install Inno Setup
             choco install innosetup
+
+            # Compile
+            cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+            cmake --build build --config Release
 
             # Run packaging script (compiles installer)
             ./package_windows.ps1
