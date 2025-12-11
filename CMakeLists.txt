@@ -13,6 +13,8 @@ set(CMAKE_AUTOUIC ON)
 
 if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0A00)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_WIN32_WINNT=0x0A00") # Force define for C
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_WIN32_WINNT=0x0A00") # Force define for C++
     link_libraries(ws2_32)
 endif()
 
