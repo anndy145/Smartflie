@@ -63,6 +63,7 @@ private:
     QVBoxLayout *mainLayout;
     QToolBar *toolbar;
     QCheckBox *chkRecursive;
+    QCheckBox *chkShowHidden;
     QTabWidget *tabWidget;
     QScrollArea *scrollArea;
     

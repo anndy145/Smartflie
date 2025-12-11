@@ -11,7 +11,7 @@ FileScanner::FileScanner()
 #include <algorithm>
 #include <set>
 
-std::vector<std::string> FileScanner::scanDirectory(const std::string& path, bool recursive)
+std::vector<std::string> FileScanner::scanDirectory(const std::string& path, bool recursive, bool showHidden)
 {
     std::vector<std::string> files;
     try {
@@ -19,6 +19,16 @@ std::vector<std::string> FileScanner::scanDirectory(const std::string& path, boo
             for (auto it = fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied);
                  it != fs::recursive_directory_iterator(); ++it) {
                 
+                // Hidden file check (Simple dot prefix or Windows attribute check could be added here)
+                // For now, let's rely on isIgnored for system folders, and assume dot-files are hidden.
+                // But on Windows, proper hidden attribute check is better.
+                // Let's implement a simple "name starts with ." check for now as a common convention,
+                // plus the showHidden flag control.
+                if (!showHidden && it->path().filename().string().starts_with(".")) {
+                     if (it->is_directory()) it.disable_recursion_pending();
+                     continue;
+                }
+
                 if (isIgnored(it->path())) {
                     if (it->is_directory()) {
                         it.disable_recursion_pending();
@@ -32,6 +42,7 @@ std::vector<std::string> FileScanner::scanDirectory(const std::string& path, boo
             }
         } else {
             for (const auto& entry : fs::directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+                if (!showHidden && entry.path().filename().string().starts_with(".")) continue;
                 if (isIgnored(entry.path())) continue;
                 
                 if (entry.is_regular_file() || entry.is_directory()) {

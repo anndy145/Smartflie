@@ -57,10 +57,16 @@ void MainWindow::setupToolbar()
     toolbar->addAction(openAction);
 
     chkRecursive = new QCheckBox("遞迴掃描 (Recursive)", this);
-    chkRecursive->setChecked(true); 
+    chkRecursive->setChecked(false);
+    toolbar->addWidget(chkRecursive);
+
+    chkShowHidden = new QCheckBox("顯示隱藏檔 (Show Hidden)", this);
+    chkShowHidden->setChecked(false);
+    toolbar->addWidget(chkShowHidden);
+
+    toolbar->addSeparator();
     // Note: Recursive check now mostly affects searching or tagging operations, 
     // as the Tree View is lazy-loaded by default to prevent freezing.
-    toolbar->addWidget(chkRecursive);
 
     toolbar->addSeparator();
 
@@ -113,6 +119,8 @@ void MainWindow::setupLayout()
     txtSearch = new QLineEdit(this);
     txtSearch->setPlaceholderText("搜尋檔案... (Search)");
     connect(txtSearch, &QLineEdit::textChanged, this, &MainWindow::filterFiles);
+    connect(chkRecursive, &QCheckBox::stateChanged, this, &MainWindow::scanFiles);
+    connect(chkShowHidden, &QCheckBox::stateChanged, this, &MainWindow::scanFiles);
     midLayout->addWidget(txtSearch);
 
     fileList = new QTreeWidget(this);
@@ -244,9 +252,9 @@ void MainWindow::scanFiles()
     // CRITICAL: Force non-recursive for UI to allow Lazy Loading.
     // Recursive scanning whole drive freezes UI.
     // We only scan top-level here.
-    bool recur = false; 
-    
-    std::vector<std::string> entries = scanner.scanDirectory(currentPath.toStdString(), recur);
+    bool recur = chkRecursive->isChecked();
+    bool showHidden = chkShowHidden->isChecked();
+    std::vector<std::string> entries = scanner.scanDirectory(currentPath.toStdString(), recur, showHidden);
 
     for (const auto& entry : entries) {
         QString fullPath = QString::fromStdString(entry);
@@ -282,7 +290,8 @@ void MainWindow::onItemExpanded(QTreeWidgetItem *item)
         QString path = item->data(0, Qt::UserRole).toString();
         FileScanner scanner;
         // Scan sub-folder (Non-recursive)
-        std::vector<std::string> entries = scanner.scanDirectory(path.toStdString(), false);
+        bool showHidden = chkShowHidden->isChecked();
+        std::vector<std::string> entries = scanner.scanDirectory(path.toStdString(), false, showHidden);
         
         for (const auto& entry : entries) {
             QString fullPath = QString::fromStdString(entry);

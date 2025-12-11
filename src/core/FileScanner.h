@@ -9,7 +9,7 @@ class FileScanner
 {
 public:
     FileScanner();
-    std::vector<std::string> scanDirectory(const std::string& path, bool recursive = false);
+    std::vector<std::string> scanDirectory(const std::string& path, bool recursive = false, bool showHidden = false);
 
 private:
     bool isIgnored(const std::filesystem::path& path);
