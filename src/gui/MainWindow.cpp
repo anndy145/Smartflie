@@ -560,16 +560,40 @@ void MainWindow::filterFiles(const QString &text)
 void MainWindow::updateFilePreview(const QString& filePath)
 {
     std::ofstream log("smartfile_debug.log", std::ios::app);
+    if (!log.is_open()) return; // Paranoia
+
     log << "Entring updateFilePreview: " << filePath.toStdString() << std::endl;
 
     QFileInfo fi(filePath);
     QString ext = fi.suffix().toLower();
     log << "Extension calculated: " << ext.toStdString() << std::endl;
     
+    if (!lblPreviewImage) {
+        log << "FATAL: lblPreviewImage is NULL!" << std::endl;
+        return;
+    }
+    log << "lblPreviewImage check OK" << std::endl;
+
     lblPreviewImage->clear();
+    log << "lblPreviewImage->clear() done" << std::endl;
+
     currentPreviewPixmap = QPixmap();
+    log << "currentPreviewPixmap reset done" << std::endl;
+    
+    if (!txtPreviewText) {
+         log << "FATAL: txtPreviewText is NULL!" << std::endl;
+         return;
+    }
     txtPreviewText->setVisible(false);
+    log << "txtPreviewText hidden" << std::endl;
+    
+    if (!scrollArea) {
+        log << "FATAL: scrollArea is NULL!" << std::endl;
+        return;
+    }
     scrollArea->setVisible(true); 
+    log << "scrollArea showed" << std::endl;
+    
     log << "UI reset done" << std::endl;
 
     if (QStringList{"png", "jpg", "jpeg", "bmp", "gif"}.contains(ext)) {
