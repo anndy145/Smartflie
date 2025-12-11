@@ -10,9 +10,12 @@ namespace fs = std::filesystem;
 
 std::string DocumentParser::extractText(const std::string& filePath)
 {
-    fs::path p(filePath);
-    std::string ext = p.extension().string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    try {
+        QString qPath = QString::fromStdString(filePath);
+        QFileInfo fi(qPath);
+        std::string ext = "." + fi.suffix().toLower().toStdString();
+        // Handle empty extension case
+        if (ext == ".") ext = "";
 
     if (ext == ".docx") {
         return parsDocx(filePath);
@@ -46,6 +49,11 @@ std::string DocumentParser::extractText(const std::string& filePath)
         }
     }
 
+    } catch (const std::exception& e) {
+        return std::string("Error reading file: ") + e.what();
+    } catch (...) {
+        return "Unknown error reading file.";
+    }
     return "";
 }
 
