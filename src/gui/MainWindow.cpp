@@ -561,28 +561,38 @@ void MainWindow::filterFiles(const QString &text)
 
 void MainWindow::updateFilePreview(const QString& filePath)
 {
+    std::ofstream log("smartfile_debug.log", std::ios::app);
+    log << "Entring updateFilePreview: " << filePath.toStdString() << std::endl;
+
     QFileInfo fi(filePath);
     QString ext = fi.suffix().toLower();
+    log << "Extension calculated: " << ext.toStdString() << std::endl;
     
     lblPreviewImage->clear();
     currentPreviewPixmap = QPixmap();
     txtPreviewText->setVisible(false);
     scrollArea->setVisible(true); 
+    log << "UI reset done" << std::endl;
 
     if (QStringList{"png", "jpg", "jpeg", "bmp", "gif"}.contains(ext)) {
+        log << "Trying to load image..." << std::endl;
         QPixmap pix(filePath);
+        log << "QPixmap constructor returned. IsNull: " << pix.isNull() << std::endl;
+        
         if (!pix.isNull()) {
             currentPreviewPixmap = pix;
             scaleFactor = 1.0;
+            log << "Updating Image Display..." << std::endl;
             updateImageDisplay();
+            log << "Image Display Updated." << std::endl;
             txtPreviewText->setVisible(false);
         } else {
             lblPreviewImage->setText("無法預覽圖片 (Invalid Image)");
+            log << "Image is null." << std::endl;
         }
     } else {
         lblPreviewImage->setText("載入中..."); 
         txtPreviewText->setVisible(true);
-        std::ofstream log("smartfile_debug.log", std::ios::app);
         log << "Extracting text from: " << filePath.toStdString() << std::endl;
         
         std::string content = DocumentParser::extractText(filePath.toStdString());
@@ -593,6 +603,7 @@ void MainWindow::updateFilePreview(const QString& filePath)
         
         lblPreviewImage->clear();
     }
+    log << "updateFilePreview finished." << std::endl;
 }
 
 void MainWindow::updateTagDisplay(const QString& filename)
