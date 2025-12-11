@@ -36,6 +36,7 @@ jobs:
         with:
           version: ${{env.QT_VERSION}}
           arch: win64_mingw
+          tools: 'tools_mingw'
 
       - if: ${{ matrix.os != 'windows-latest' }}
         uses: jurplel/install-qt-action@v4
