@@ -369,8 +369,14 @@ void MainWindow::onFileSelected(QTreeWidgetItem *item, int column)
     std::filesystem::path p(filePath.toStdString());
     if (std::filesystem::is_directory(p)) return; // Don't preview folders
 
+    std::ofstream log("smartfile_debug.log", std::ios::app);
+    log << "onFileSelected: " << filePath.toStdString() << std::endl;
+    
     updateFilePreview(filePath);
+    log << "Preview Updated" << std::endl;
+    
     updateTagDisplay(QString::fromStdString(p.filename().string()));
+    log << "Tags Updated" << std::endl;
 }
 
 void MainWindow::openFile(QTreeWidgetItem* item, int column)
@@ -576,8 +582,15 @@ void MainWindow::updateFilePreview(const QString& filePath)
     } else {
         lblPreviewImage->setText("載入中..."); 
         txtPreviewText->setVisible(true);
+        std::ofstream log("smartfile_debug.log", std::ios::app);
+        log << "Extracting text from: " << filePath.toStdString() << std::endl;
+        
         std::string content = DocumentParser::extractText(filePath.toStdString());
+        log << "Text extracted (size: " << content.size() << ")" << std::endl;
+        
         txtPreviewText->setText(QString::fromStdString(content));
+        log << "Preview text set" << std::endl;
+        
         lblPreviewImage->clear();
     }
 }
@@ -593,6 +606,9 @@ void MainWindow::updateTagDisplay(const QString& filename)
     else tagStr.chop(2); 
     
     lblTags->setText(tagStr);
+    
+    std::ofstream log("smartfile_debug.log", std::ios::app);
+    log << "Tag display updated" << std::endl;
 }
 
 void MainWindow::renameFile()
