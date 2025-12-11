@@ -249,14 +249,14 @@ void MainWindow::scanFiles()
     std::vector<std::string> entries = scanner.scanDirectory(currentPath.toStdString(), recur);
 
     for (const auto& entry : entries) {
-        std::filesystem::path p(entry);
-        QString filename = QString::fromStdString(p.filename().string());
         QString fullPath = QString::fromStdString(entry);
+        QFileInfo fi(fullPath);
+        QString filename = fi.fileName();
 
         QTreeWidgetItem* item = new QTreeWidgetItem(fileList);
         item->setText(0, filename);
         
-        if (std::filesystem::is_directory(p)) {
+        if (fi.isDir()) {
             item->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
             item->setData(0, Qt::UserRole, fullPath); 
             // Add Dummy Child for expansion
@@ -285,14 +285,14 @@ void MainWindow::onItemExpanded(QTreeWidgetItem *item)
         std::vector<std::string> entries = scanner.scanDirectory(path.toStdString(), false);
         
         for (const auto& entry : entries) {
-            std::filesystem::path p(entry);
-            QString filename = QString::fromStdString(p.filename().string());
             QString fullPath = QString::fromStdString(entry);
+            QFileInfo fi(fullPath);
+            QString filename = fi.fileName();
             
             QTreeWidgetItem* child = new QTreeWidgetItem(item);
             child->setText(0, filename);
             
-            if (std::filesystem::is_directory(p)) {
+            if (fi.isDir()) {
                 child->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
                 child->setData(0, Qt::UserRole, fullPath);
                 new QTreeWidgetItem(child); // Dummy
@@ -366,25 +366,22 @@ void MainWindow::onFileSelected(QTreeWidgetItem *item, int column)
     QString filePath = item->data(0, Qt::UserRole).toString();
     if (filePath.isEmpty()) return; 
     
-    std::filesystem::path p(filePath.toStdString());
-    if (std::filesystem::is_directory(p)) return; // Don't preview folders
+    QFileInfo fi(filePath);
+    if (fi.isDir()) return; // Don't preview folders
 
-    std::ofstream log("smartfile_debug.log", std::ios::app);
-    log << "onFileSelected: " << filePath.toStdString() << std::endl;
+    // Debugging logs removed for production or simplified
+    // updateFilePreview handles logging now
     
     updateFilePreview(filePath);
-    log << "Preview Updated" << std::endl;
-    
-    updateTagDisplay(QString::fromStdString(p.filename().string()));
-    log << "Tags Updated" << std::endl;
+    updateTagDisplay(fi.fileName());
 }
 
 void MainWindow::openFile(QTreeWidgetItem* item, int column)
 {
     QString filePath = item->data(0, Qt::UserRole).toString();
     if (!filePath.isEmpty()) {
-        std::filesystem::path p(filePath.toStdString());
-        if (!std::filesystem::is_directory(p)) {
+        QFileInfo fi(filePath);
+        if (!fi.isDir()) {
              QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
         }
     }
@@ -400,7 +397,8 @@ void MainWindow::showContextMenu(const QPoint &pos)
     if (path.isEmpty()) return;
      
     // Check if file
-    if (std::filesystem::is_directory(path.toStdString())) return;
+    // Check if file
+    if (QFileInfo(path).isDir()) return;
 
     QMenu contextMenu(tr("Context Menu"), this);
 
@@ -434,7 +432,7 @@ void MainWindow::analyzeFile()
     if (fileList->selectedItems().isEmpty()) return;
     QString filePath = fileList->selectedItems().first()->data(0, Qt::UserRole).toString();
     
-    if (std::filesystem::is_directory(filePath.toStdString())) return;
+    if (QFileInfo(filePath).isDir()) return;
 
     lblStatus->setText("Reading file...");
     QApplication::processEvents();
@@ -452,7 +450,7 @@ void MainWindow::analyzeFile()
 
     lblStatus->setText("Analyzing with AI...");
     
-    std::string filenameStr = std::filesystem::path(filePath.toStdString()).filename().string();
+    std::string filenameStr = QFileInfo(filePath).fileName().toStdString();
     
     QFuture<std::string> future = QtConcurrent::run(QThreadPool::globalInstance(), [this, filenameStr, content]() -> std::string {
         return llamaEngine.suggestTags(filenameStr, content);
@@ -533,8 +531,8 @@ void MainWindow::removeGlobalTag()
          updateTagList();
          if (!fileList->selectedItems().isEmpty()) {
              QString filePath = fileList->selectedItems().first()->data(0, Qt::UserRole).toString();
-             std::filesystem::path p(filePath.toStdString());
-             updateTagDisplay(QString::fromStdString(p.filename().string()));
+              QString localName = QFileInfo(filePath).fileName();
+              updateTagDisplay(localName);
          }
      }
 }
@@ -637,16 +635,16 @@ void MainWindow::renameFile()
                                             tr("New name:"), QLineEdit::Normal,
                                             oldName, &ok);
     if (ok && !newName.isEmpty() && newName != oldName) {
-        std::filesystem::path oldFull(fullPath.toStdString());
-        std::filesystem::path newFull = oldFull.parent_path() / newName.toStdString();
+        QFileInfo oldInfo(fullPath);
+        QString newPath = oldInfo.dir().absoluteFilePath(newName);
         
-        try {
-            std::filesystem::rename(oldFull, newFull);
+        if (QFile::rename(fullPath, newPath)) {
+            // Note: tagManager.renameFile assumes simple filenames for keys, keep that consistent?
             tagManager.renameFile(oldName.toStdString(), newName.toStdString());
             scanFiles(); 
             lblStatus->setText(QString("已更名 %1 -> %2").arg(oldName).arg(newName));
-        } catch (const std::filesystem::filesystem_error& e) {
-             QMessageBox::critical(this, "Error", QString("Rename failed: %1").arg(e.what()));
+        } else {
+             QMessageBox::critical(this, "Error", QString("Rename failed. Check permissions or if file exists."));
         }
     }
 }
@@ -667,21 +665,16 @@ void MainWindow::deleteFile()
                                   QMessageBox::Yes|QMessageBox::No);
     
     if (reply == QMessageBox::Yes) {
-        std::filesystem::path path(fullPath.toStdString());
-        try {
-            if (std::filesystem::remove(path)) {
-                tagManager.removeFile(filename.toStdString());
-                scanFiles();
-                txtPreviewText->clear();
-                lblPreviewImage->setText("已刪除 (Deleted)");
-                currentPreviewPixmap = QPixmap();
-                lblTags->setText("標籤: --");
-                lblStatus->setText(QString("已刪除 %1").arg(filename));
-            } else {
-                 QMessageBox::critical(this, "Error", "刪除失敗 (Delete failed). File may be in use.");
-            }
-        } catch (const std::filesystem::filesystem_error& e) {
-             QMessageBox::critical(this, "Error", QString("Delete failed: %1").arg(e.what()));
+        if (QFile::remove(fullPath)) {
+            tagManager.removeFile(filename.toStdString());
+            scanFiles();
+            txtPreviewText->clear();
+            lblPreviewImage->setText("已刪除 (Deleted)");
+            currentPreviewPixmap = QPixmap();
+            lblTags->setText("標籤: --");
+            lblStatus->setText(QString("已刪除 %1").arg(filename));
+        } else {
+             QMessageBox::critical(this, "Error", "刪除失敗 (Delete failed). File may be in use.");
         }
     }
 }
