@@ -25,6 +25,27 @@ std::string DocumentParser::extractText(const std::string& filePath)
     } else if (ext == ".html" || ext == ".htm" || ext == ".shtml" || ext == ".xhtml") {
         return parseHtml(filePath);
     }
+    }
+    
+    // Explicitly supported text extensions
+    static const std::set<std::string> textExts = {
+        ".txt", ".md", ".csv", ".xml", ".json", ".log",
+        ".cpp", ".h", ".c", ".hpp", ".py", ".js", ".ts", ".css", ".svg",
+        ".php", ".asp", ".aspx", ".java", ".cs", ".go", ".rs", ".sql", 
+        ".cmake", ".gradle", ".properties", ".ini", ".conf", ".cfg"
+    };
+
+    if (textExts.count(ext) || ext.empty()) {
+        // Fallback: Try to read as plain text
+        QFile file(QString::fromStdString(filePath));
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+             // Limit to 32KB to avoid reading massive binary files by accident
+             // (Though FileScanner should have filtered known binaries)
+             QByteArray data = file.read(32768); 
+             return data.toStdString();
+        }
+    }
+
     return "";
 }
 

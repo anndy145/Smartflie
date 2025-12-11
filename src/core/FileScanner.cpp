@@ -55,7 +55,8 @@ bool FileScanner::isIgnored(const std::filesystem::path& path)
         "build", "bin", "obj", "debug", "release", 
         "__pycache__", "node_modules", "target",
         "Steam", "steamapps", "Program Files", "Program Files (x86)", 
-        "Windows", "System32", "AppData"
+        "Windows", "System32", "AppData",
+        "Thumbs.db", ".DS_Store" // Sometimes treated as dirs on some OS logic, safe to add
     };
 
     // Ignored extensions (lowercase)
@@ -64,7 +65,11 @@ bool FileScanner::isIgnored(const std::filesystem::path& path)
         ".pdb", ".ilk", ".exp", ".idb", ".pch", 
         ".cmake", ".sln", ".vcxproj", ".vcxproj.filters", ".vcxproj.user",
         ".log", ".tlog", ".ninja", ".qm", ".ts",
-        ".lnk", ".url", ".sys", ".iso", ".msi" 
+        ".lnk", ".url", ".sys", ".iso", ".msi",
+        // System Junk
+        ".ds_store", ".thumbs", ".ini", 
+        // Large Design Files (Phase 2 ignored to save time)
+        ".psd", ".ai", ".ae", ".prproj", ".aep", ".indd"
     };
 
     if (fs::is_directory(path)) {
