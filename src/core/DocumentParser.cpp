@@ -5,6 +5,7 @@
 #include <QXmlStreamReader>
 #include <filesystem>
 #include <iostream>
+#include <set>
 
 namespace fs = std::filesystem;
 

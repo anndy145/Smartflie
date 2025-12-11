@@ -29,7 +29,7 @@ set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     llama_cpp
     GIT_REPOSITORY https://github.com/ggerganov/llama.cpp
-    GIT_TAG        e4ae3833 # Pin to known working commit (approx b3196)
+    GIT_TAG        b3196 # Stable release June 2024
 )
 
 FetchContent_Declare(
