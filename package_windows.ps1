@@ -73,6 +73,34 @@ if (Test-Path $LlamaDll) {
 
 
 
+# 5b. Copy DLLs (OpenCV, ONNX Runtime)
+Write-Host "Checking for external DLLs..."
+$LibsDir = Join-Path $ProjectRoot "libs"
+# Check libs folder (CI/Repo structure)
+if (Test-Path $LibsDir) {
+    $Dlls = @("opencv_world*.dll", "onnxruntime*.dll")
+    foreach ($pattern in $Dlls) {
+        Get-ChildItem -Path $LibsDir -Filter $pattern -Recurse | ForEach-Object {
+            $Dest = Join-Path $OutputDir $_.Name
+            if (-not (Test-Path $Dest)) {
+                Copy-Item $_.FullName $OutputDir
+                Write-Host "  Copied $($_.Name) from Libs"
+            }
+        }
+    }
+}
+# Check Build folder (Local Dev)
+$Dlls = @("opencv_world*.dll", "onnxruntime*.dll")
+foreach ($pattern in $Dlls) {
+    Get-ChildItem -Path $BuildDir -Filter $pattern | ForEach-Object {
+        $Dest = Join-Path $OutputDir $_.Name
+        if (-not (Test-Path $Dest)) {
+            Copy-Item $_.FullName $OutputDir
+            Write-Host "  Copied $($_.Name) from Build"
+        }
+    }
+}
+
 # 6. Create Installer (Inno Setup)
 Write-Host "Checking for Inno Setup..."
 $ISCC = "ISCC.exe"
