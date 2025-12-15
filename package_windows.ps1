@@ -135,4 +135,3 @@ Write-Host "  - Portable ZIP: $ZipPath"
 Write-Host "Cleaning up staging directory to save space..."
 if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
 Write-Host "Done."
-```
