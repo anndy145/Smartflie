@@ -22,12 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: [linux_x64, macos_arm64, windows_x64]
+        build: [windows_x64]
         include:
-          - build: linux_x64
-            os: ubuntu-latest
-          - build: macos_arm64
-            os: macos-latest
           - build: windows_x64
             os: windows-latest
 
