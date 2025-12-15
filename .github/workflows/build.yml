@@ -67,7 +67,7 @@ jobs:
             cmake --build build --config Release
 
             # Run packaging script (compiles installer)
-            ./package_windows.ps1
+            pwsh ./package_windows.ps1
             
             # Move the generated setup exe to dist
             mv SmartFile_Setup_*.exe dist/${{ matrix.build }}/
