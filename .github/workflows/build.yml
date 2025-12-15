@@ -54,6 +54,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Download AI Models
+        shell: bash
+        run: |
+          mkdir -p models
+          echo "Downloading Qwen..."
+          curl -L -o models/qwen2.5-3b-instruct-q4_k_m.gguf "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+          
+          echo "Downloading CLIP Vision..."
+          curl -L -o models/clip-vision.onnx "https://huggingface.co/Lednik7/CLIP-ONNX/resolve/main/visual.onnx"
+          
+          echo "Downloading CLIP Text..."
+          curl -L -o models/clip-text.onnx "https://huggingface.co/Lednik7/CLIP-ONNX/resolve/main/textual.onnx"
+
       - name: Build release package
         shell: bash
         run: |
