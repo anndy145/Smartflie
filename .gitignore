@@ -16,6 +16,8 @@ _deps/
 *.dylib
 *.a
 *.lib
+!libs/**/*.lib
+!libs/**/*.dll
 *.o
 *.obj
 *.pdb

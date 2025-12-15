@@ -15,6 +15,7 @@ if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0A00)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_WIN32_WINNT=0x0A00 -D_Frees_ptr_opt_=") # Force define for C
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_WIN32_WINNT=0x0A00 -D_Frees_ptr_opt_=") # Force define for C++
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--allow-multiple-definition")
     link_libraries(ws2_32)
 endif()
 
