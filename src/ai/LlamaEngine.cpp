@@ -24,7 +24,7 @@ LlamaEngine::LlamaEngine()
 LlamaEngine::~LlamaEngine()
 {
     if (ctx) llama_free(ctx);
-    if (model) llama_model_free(model);
+    if (model) llama_free_model(model);
     llama_backend_free();
 }
 
@@ -35,13 +35,13 @@ bool LlamaEngine::loadModel(const std::string& modelPath)
         ctx = nullptr;
     }
     if (model) {
-        llama_model_free(model);
+        llama_free_model(model);
         model = nullptr;
     }
 
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = 100; // Try to use GPU
-    model = llama_model_load_from_file(modelPath.c_str(), model_params);
+    model = llama_load_model_from_file(modelPath.c_str(), model_params);
 
     if (!model) {
         std::cerr << "Failed to load model from " << modelPath << std::endl;
@@ -49,13 +49,15 @@ bool LlamaEngine::loadModel(const std::string& modelPath)
     }
 
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 32768; // Support up to 32k context (Qwen standard)
-    ctx_params.n_batch = 2048; // Batch size for processing
-    ctx_params.embeddings = true; // Enable embedding extraction
-    ctx = llama_init_from_model(model, ctx_params);
+    ctx_params.n_ctx = 8192; // Increased to 8k (Balance between OOM and functionality)
+    ctx_params.n_batch = 2048; 
+    ctx_params.embeddings = true; 
+    ctx = llama_new_context_with_model(model, ctx_params);
 
     if (!ctx) {
-        std::cerr << "Failed to create context" << std::endl;
+        std::cerr << "Failed to create context (OOM?)" << std::endl;
+        llama_free_model(model);
+        model = nullptr;
         return false;
     }
 
@@ -66,15 +68,12 @@ std::string LlamaEngine::generateResponse(const std::string& prompt)
 {
     if (!ctx || !model) return "Error: Model not loaded";
 
-    // Try to clear KV cache if possible, otherwise rely on new batch
-    // llama_kv_cache_clear(ctx); // Removed due to API uncertainty
-
-    const llama_vocab* vocab = llama_model_get_vocab(model);
-
     // 1. Tokenize
-    const int n_prompt = -llama_tokenize(vocab, prompt.c_str(), prompt.length(), NULL, 0, true, true);
+    int n_prompt = llama_tokenize(model, prompt.c_str(), prompt.length(), NULL, 0, true, true);
+    if (n_prompt < 0) n_prompt = -n_prompt;
+    
     std::vector<llama_token> prompt_tokens(n_prompt);
-    if (llama_tokenize(vocab, prompt.c_str(), prompt.length(), prompt_tokens.data(), n_prompt, true, true) < 0) {
+    if (llama_tokenize(model, prompt.c_str(), prompt.length(), prompt_tokens.data(), n_prompt, true, true) < 0) {
         return "Error: Tokenization failed";
     }
 
@@ -111,55 +110,87 @@ std::string LlamaEngine::generateResponse(const std::string& prompt)
         }
     }
     
-    int n_curr = batch.n_tokens + (processed - batch.n_tokens); // Logic check: n_curr should be n_prompt
-    n_curr = n_prompt; // Force correct pos
+    int n_curr = processed; 
     
-    llama_batch_free(batch); 
-
+    // We keep 'batch' allocated but clear it to reuse for sampling
+    // Note: older batch content is irrelevant for next decode, but context retains KV
+    
     // 4. Sample loop
     std::stringstream response_ss;
     int n_predict = 256; 
     
-    auto sparams = llama_sampler_chain_default_params();
-    struct llama_sampler * smpl = llama_sampler_chain_init(sparams);
-    llama_sampler_chain_add(smpl, llama_sampler_init_greedy()); 
-
     llama_token new_token_id = 0;
+    const llama_model * model_ptr = llama_get_model(ctx);
+    int n_vocab = llama_n_vocab(model_ptr);
 
-    for (int i = 0; i < n_predict; ++i) {
-         new_token_id = llama_sampler_sample(smpl, ctx, -1);
+    try {
+        for (int i = 0; i < n_predict; ++i) {
+             // Safe Logits Access
+             float* all_logits = llama_get_logits(ctx);
+             if (!all_logits) {
+                 std::cerr << "Error: null logits during sampling" << std::endl;
+                 break; 
+             }
 
-         if (llama_vocab_is_eog(vocab, new_token_id)) {
-             break;
-         }
+             // Greedy sampling
+             float max_val = -1e9;
+             int max_idx = 0;
+             for (int v = 0; v < n_vocab; ++v) {
+                 if (all_logits[v] > max_val) {
+                     max_val = all_logits[v];
+                     max_idx = v;
+                 }
+             }
+             new_token_id = max_idx;
 
-         char buf[256];
-         int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
-         if (n >= 0) {
-             std::string piece(buf, n);
-             response_ss << piece;
-         }
+             if (llama_token_is_eog(model, new_token_id)) { 
+                 break;
+             }
 
-         llama_batch batch_one = llama_batch_init(1, 0, 1);
-         batch_add(batch_one, new_token_id, n_curr, {0}, true);
-         n_curr++;
+             char buf[256];
+             int n = llama_token_to_piece(model, new_token_id, buf, sizeof(buf), true);
+             if (n > 0) {
+                 std::string piece(buf, n);
+                 response_ss << piece;
+             }
 
-         if (llama_decode(ctx, batch_one) != 0) {
+             // Decode next token
+             // Re-use batch structure (it's just a struct wrapper)
+             // We need to re-init it for size 1
+             // But wait, we freed it outside earlier? NO, let's NOT free it until end
+             // The previous code freed it at 'int n_curr = processed; llama_batch_free(batch);'
+             
+             // We must NOT reuse a freed batch. We should allocate a new one or keep the old one.
+             // Best to just use a small single-token batch for valid generation.
+             
+             llama_batch batch_one = llama_batch_init(1, 0, 1);
+             batch_add(batch_one, new_token_id, n_curr, {0}, true);
+             
+             int ret = llama_decode(ctx, batch_one);
              llama_batch_free(batch_one);
-             break;
-         }
-         llama_batch_free(batch_one);
-    }
-    
-    llama_sampler_free(smpl);
 
+             if (ret != 0) {
+                 std::cerr << "Error: llama_decode failed during generation" << std::endl;
+                 break;
+             }
+             n_curr++;
+        }
+    } catch (...) {
+        std::cerr << "Exception during generation" << std::endl;
+    }
+
+    // Cleanup the original large batch
+    llama_batch_free(batch);
+    
     return response_ss.str();
 }
 
 std::string LlamaEngine::suggestTags(const std::string& filename, const std::string& content)
 {
-    // Qwen / ChatML Format
-    std::string safeContent = content.empty() ? "(No content)" : content.substr(0, 16000);
+    // Limit content to fit in context window (Safe limit)
+    // 4000 chars is roughly 2000-3000 tokens (Chinese/English mixed)
+    // Prompt overhead is small (~100 tokens)
+    std::string safeContent = content.empty() ? "(No content)" : content.substr(0, 4000);
     
     std::string prompt = 
         "<|im_start|>system\n"
@@ -188,51 +219,60 @@ std::vector<float> LlamaEngine::getEmbeddings(const std::string& text)
 {
     if (!ctx || !model) return {};
     
-    // llama_kv_cache_clear(ctx); // Removed
-
-    const llama_vocab* vocab = llama_model_get_vocab(model);
-    
-    // Tokenize
-    int n_prompt = -llama_tokenize(vocab, text.c_str(), text.length(), NULL, 0, true, true);
-    std::vector<llama_token> prompt_tokens(n_prompt);
-    if (llama_tokenize(vocab, text.c_str(), text.length(), prompt_tokens.data(), n_prompt, true, true) < 0) {
-        return {};
-    }
-
-    if (n_prompt >= llama_n_ctx(ctx)) {
-        n_prompt = llama_n_ctx(ctx) - 1;
-        prompt_tokens.resize(n_prompt);
-    }
-
-    // Process batch
-    llama_batch batch = llama_batch_init(n_prompt, 0, 1);
-    for (int i = 0; i < n_prompt; ++i) {
-        batch_add(batch, prompt_tokens[i], i, {0}, (i == n_prompt - 1)); 
-    }
-
-    if (llama_decode(ctx, batch) != 0) {
-        llama_batch_free(batch);
-        return {};
-    }
-    
-    // Get embeddings
-    int n_embd = llama_model_n_embd(model); // Updated
-    std::vector<float> result(n_embd);
-    
-    // Use llama_get_embeddings_ith
-    const float* emb = llama_get_embeddings_ith(ctx, batch.n_tokens - 1); // Last token
-    if (emb) {
-        memcpy(result.data(), emb, n_embd * sizeof(float));
-    } else {
-        // Fallback or error
-        // If not found, try generic get_embeddings
-        const float* all_emb = llama_get_embeddings(ctx);
-        if (all_emb) {
-             // Assuming last token
-             memcpy(result.data(), all_emb + ((batch.n_tokens - 1) * n_embd), n_embd * sizeof(float));
+    try {
+        // Tokenize
+        int n_prompt = llama_tokenize(model, text.c_str(), text.length(), NULL, 0, true, true);
+        if (n_prompt < 0) n_prompt = -n_prompt;
+        
+        std::vector<llama_token> prompt_tokens(n_prompt);
+        if (llama_tokenize(model, text.c_str(), text.length(), prompt_tokens.data(), n_prompt, true, true) < 0) {
+            return {};
         }
-    }
 
-    llama_batch_free(batch);
-    return result;
+        if (n_prompt >= llama_n_ctx(ctx)) {
+            n_prompt = llama_n_ctx(ctx) - 1;
+            prompt_tokens.resize(n_prompt);
+        }
+
+        // Process batch
+        llama_batch batch = llama_batch_init(n_prompt, 0, 1);
+        for (int i = 0; i < n_prompt; ++i) {
+            batch_add(batch, prompt_tokens[i], i, {0}, (i == n_prompt - 1)); 
+        }
+
+        if (llama_decode(ctx, batch) != 0) {
+            llama_batch_free(batch);
+            return {};
+        }
+        
+        // Get embeddings
+        int n_embd = llama_n_embd(model); 
+        std::vector<float> result(n_embd);
+        
+        // Use llama_get_embeddings_ith
+        // Note: For older llama.cpp versions or specific builds, we use generic get_embeddings
+        const float* emb = nullptr; 
+        
+        // Try specific ith embedding first if API supports it (b3196 does)
+        emb = llama_get_embeddings_ith(ctx, batch.n_tokens - 1);
+        
+        if (!emb) {
+             // Fallback
+             emb = llama_get_embeddings(ctx);
+        }
+
+        if (emb) {
+            memcpy(result.data(), emb, n_embd * sizeof(float));
+        } else {
+            // Log error
+            std::cerr << "Failed to retrieve embeddings" << std::endl;
+            result.clear();
+        }
+
+        llama_batch_free(batch);
+        return result;
+    } catch (...) {
+        std::cerr << "Exception in getEmbeddings" << std::endl;
+        return {};
+    }
 }

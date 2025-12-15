@@ -20,8 +20,10 @@
 #include <QtConcurrent>
 #include "GraphWidget.h"
 #include "../ai/LlamaEngine.h"
+#include "../ai/VisionEngine.h"
 #include "../core/TagManager.h"
 #include "../core/DirectoryWatcher.h"
+#include "../core/VectorIndex.h"
 
 class MainWindow : public QMainWindow
 {
@@ -47,6 +49,7 @@ private slots:
     void removeTag();
     void removeGlobalTag();
     void filterFiles(const QString &text);
+    void onSearchReturnPressed(); // New
     void onFileSelected(QTreeWidgetItem *item, int column);
     void onItemExpanded(QTreeWidgetItem *item);
     void onTagSelected(QListWidgetItem *item);
@@ -98,15 +101,20 @@ private:
 
     // Data
     QString currentPath;
-    LlamaEngine llamaEngine;
-    TagManager tagManager;
-    QFutureWatcher<std::string> *watcher;
+    // Engines
+    LlamaEngine *llamaEngine;
+    VisionEngine *visionEngine;
+    
+    // Core
+    TagManager *tagManager;
+    DirectoryWatcher *directoryWatcher; // Renamed to avoid conflict with QFutureWatcher
+    VectorIndex *vectorIndex;
+    QFutureWatcher<std::string> *watcher; // This was already a pointer, kept as is
     
     // State
     QPixmap currentPreviewPixmap; // Store original for resizing logic
     double scaleFactor = 1.0;
 
-    // Watcher
     DirectoryWatcher dirWatcher;
 
 private slots:

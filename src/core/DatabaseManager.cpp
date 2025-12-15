@@ -282,17 +282,19 @@ static float cosineSimilarity(const std::vector<float>& A, const std::vector<flo
     return dot / (std::sqrt(normA) * std::sqrt(normB));
 }
 
-std::vector<int> DatabaseManager::findSimilarFiles(int targetFileId, int topK)
+
+
+std::vector<int> DatabaseManager::findSimilarFiles(const std::vector<float>& targetVec, int topK)
 {
-    std::vector<float> targetVec = getVector(targetFileId);
     if (targetVec.empty()) return {};
     
     std::map<int, std::vector<float>> allVecs = getAllVectors();
     std::vector<std::pair<int, float>> scores;
     
     for (const auto& [id, vec] : allVecs) {
-        if (id == targetFileId) continue; // Skip self
-        
+        // Simple dimension check - automatically filters disparate models (e.g. CLIP vs Llama)
+        if (vec.size() != targetVec.size()) continue;
+
         float score = cosineSimilarity(targetVec, vec);
         scores.push_back({id, score});
     }
@@ -307,6 +309,14 @@ std::vector<int> DatabaseManager::findSimilarFiles(int targetFileId, int topK)
         result.push_back(scores[i].first);
     }
     return result;
+}
+
+std::vector<int> DatabaseManager::findSimilarFiles(int targetFileId, int topK)
+{
+    std::vector<float> targetVec = getVector(targetFileId);
+    if (targetVec.empty()) return {};
+    
+    return findSimilarFiles(targetVec, topK); // Reuse logic
 }
 
 

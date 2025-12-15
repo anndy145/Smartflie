@@ -40,6 +40,7 @@ public:
     
     // Similarity Search
     std::vector<int> findSimilarFiles(int targetFileId, int topK = 5);
+    std::vector<int> findSimilarFiles(const std::vector<float>& targetVec, int topK = 5);
 
 private:
     DatabaseManager();

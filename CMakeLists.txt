@@ -18,6 +18,32 @@ if(WIN32)
     link_libraries(ws2_32)
 endif()
 
+# === Vision Dependencies (Auto-downloaded by setup_vision_deps.ps1) ===
+set(LIBS_DIR "${CMAKE_SOURCE_DIR}/libs")
+
+# 1. OpenCV
+# set(OpenCV_DIR "${LIBS_DIR}/OpenCV-MinGW-Build-OpenCV-4.5.5-x64/x64/mingw/lib") # Hint for find_package
+# set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${LIBS_DIR}/OpenCV-MinGW-Build-OpenCV-4.5.5-x64/x64/mingw")
+
+find_package(OpenCV QUIET)
+if (OpenCV_FOUND)
+    message(STATUS "Found OpenCV: ${OpenCV_VERSION}")
+else()
+    message(WARNING "OpenCV not found! Vision features will be disabled. Run setup_vision_deps.ps1")
+endif()
+
+# 2. ONNX Runtime
+set(ONNX_ROOT "${LIBS_DIR}/onnxruntime-win-x64-1.16.3")
+if(EXISTS "${ONNX_ROOT}/include/onnxruntime_c_api.h")
+    message(STATUS "Found ONNX Runtime at: ${ONNX_ROOT}")
+    set(ONNX_FOUND ON)
+    include_directories("${ONNX_ROOT}/include")
+    link_directories("${ONNX_ROOT}/lib")
+else()
+    message(WARNING "ONNX Runtime not found! Run setup_vision_deps.ps1")
+    set(ONNX_FOUND OFF)
+endif()
+
 include(FetchContent)
 
 # Set llama.cpp options before MakeAvailable
@@ -56,6 +82,8 @@ add_executable(SmartFileOrganizer
     src/core/TagManager.h
     src/ai/LlamaEngine.cpp
     src/ai/LlamaEngine.h
+    src/ai/VisionEngine.cpp
+    src/ai/VisionEngine.h
     src/core/DocumentParser.cpp
     src/core/DocumentParser.h
     src/core/DirectoryWatcher.cpp
@@ -75,7 +103,17 @@ target_include_directories(SmartFileOrganizer PRIVATE
     src/vendor/hnswlib
 )
 
-target_link_libraries(SmartFileOrganizer PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Sql llama nlohmann_json::nlohmann_json)
+target_link_libraries(SmartFileOrganizer PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Sql llama nlohmann_json::nlohmann_json mingw32)
+
+if(OpenCV_FOUND)
+    target_link_libraries(SmartFileOrganizer PRIVATE ${OpenCV_LIBS})
+    target_compile_definitions(SmartFileOrganizer PRIVATE ENABLE_OPENCV)
+endif()
+
+if(ONNX_FOUND)
+    target_link_libraries(SmartFileOrganizer PRIVATE onnxruntime)
+    target_compile_definitions(SmartFileOrganizer PRIVATE ENABLE_ONNX)
+endif()
 
 if(WIN32)
     set_property(TARGET SmartFileOrganizer PROPERTY WIN32_EXECUTABLE ON)

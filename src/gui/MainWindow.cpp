@@ -31,6 +31,44 @@ MainWindow::MainWindow(QWidget *parent)
     setupToolbar();
     setupLayout();
 
+    // Set Window Icon
+    setWindowIcon(QIcon("assets/icon/icon.png")); // Try relative path (deployed)
+    if (windowIcon().isNull()) {
+         setWindowIcon(QIcon("../assets/icon/icon.png")); // Fallback for dev
+    }
+
+    // Initialize Core Components
+    tagManager = new TagManager();
+    directoryWatcher = new DirectoryWatcher(this); // Renamed from dirWatcher
+    vectorIndex = new VectorIndex();
+    
+    // Initialize Engines
+    llamaEngine = new LlamaEngine();
+    visionEngine = new VisionEngine();
+
+    // Try to load Vision Model automatically
+    if (visionEngine->isAvailable()) {
+        if (!visionEngine->initialize("models/clip-vision.onnx")) {
+             // Fallback to parent directory (DEV environment)
+             visionEngine->initialize("../models/clip-vision.onnx");
+        }
+    }
+
+    // Initialize Llama (Auto Load Qwen)
+    // Hardcoded per user request
+    QString qwenPath = "D:/project/smartfile/models/qwen2.5-3b-instruct-q4_k_m.gguf";
+    if (QFile::exists(qwenPath)) {
+        if (llamaEngine->loadModel(qwenPath.toStdString())) {
+            // Success
+            qDebug() << "Auto-loaded Qwen model:" << qwenPath;
+        } else {
+             QMessageBox::warning(this, "Error", "Failed to auto-load default Qwen model.");
+        }
+    } else {
+         // Log but allow continue (maybe user moved it)
+         qDebug() << "Default model not found at:" << qwenPath;
+    }
+
     // Initialize watcher
     watcher = new QFutureWatcher<std::string>(this);
     connect(watcher, &QFutureWatcher<std::string>::finished, this, &MainWindow::onAnalysisFinished);
@@ -39,12 +77,17 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle("Smart File Organizer");
     
     // Connect Watcher
-    connect(&dirWatcher, &DirectoryWatcher::fileAdded, this, &MainWindow::onMoniFileAdded);
-    connect(&dirWatcher, &DirectoryWatcher::fileDeleted, this, &MainWindow::onMoniFileDeleted);
+    connect(directoryWatcher, &DirectoryWatcher::fileAdded, this, &MainWindow::onMoniFileAdded);
+    connect(directoryWatcher, &DirectoryWatcher::fileDeleted, this, &MainWindow::onMoniFileDeleted);
 }
 
 MainWindow::~MainWindow()
 {
+    delete llamaEngine;
+    delete visionEngine;
+    delete tagManager;
+    delete vectorIndex;
+    // directoryWatcher is child of this, auto deleted
 }
 
 void MainWindow::setupToolbar()
@@ -70,9 +113,9 @@ void MainWindow::setupToolbar()
 
     toolbar->addSeparator();
 
-    QAction *loadModelAction = new QAction("載入模型 (Load Model)", this);
-    connect(loadModelAction, &QAction::triggered, this, &MainWindow::loadModel);
-    toolbar->addAction(loadModelAction);
+    // QAction *loadModelAction = new QAction("載入模型 (Load Model)", this);
+    // connect(loadModelAction, &QAction::triggered, this, &MainWindow::loadModel);
+    // toolbar->addAction(loadModelAction);
 }
 
 void MainWindow::setupLayout()
@@ -117,8 +160,9 @@ void MainWindow::setupLayout()
     midLayout->addWidget(new QLabel("檔案列表 (Files)"));
 
     txtSearch = new QLineEdit(this);
-    txtSearch->setPlaceholderText("搜尋檔案... (Search)");
+    txtSearch->setPlaceholderText("搜尋檔案... (@開頭為語意搜尋)");
     connect(txtSearch, &QLineEdit::textChanged, this, &MainWindow::filterFiles);
+    connect(txtSearch, &QLineEdit::returnPressed, this, &MainWindow::onSearchReturnPressed);
     connect(chkRecursive, &QCheckBox::stateChanged, this, &MainWindow::scanFiles);
     connect(chkShowHidden, &QCheckBox::stateChanged, this, &MainWindow::scanFiles);
     midLayout->addWidget(txtSearch);
@@ -218,7 +262,7 @@ void MainWindow::setupLayout()
     tabWidget->addTab(explorerTab, "檔案瀏覽器 (Explorer)");
 
     // === Tab 2: Graph View ===
-    graphWidget = new GraphWidget(&tagManager, this);
+    graphWidget = new GraphWidget(tagManager, this);
     tabWidget->addTab(graphWidget, "關聯視圖 (Graph)");
 }
 
@@ -237,8 +281,8 @@ void MainWindow::openFolder()
 
     if (!dir.isEmpty()) {
         currentPath = dir;
-        dirWatcher.addPath(currentPath); 
-        tagManager.loadTags(currentPath.toStdString());
+        directoryWatcher->addPath(currentPath); 
+        tagManager->loadTags(currentPath.toStdString());
         scanFiles();
     }
 }
@@ -318,7 +362,7 @@ void MainWindow::onItemExpanded(QTreeWidgetItem *item)
 void MainWindow::updateTagList()
 {
     tagListWidget->clear();
-    std::vector<std::string> tags = tagManager.getAllTags();
+    std::vector<std::string> tags = tagManager->getAllTags();
     
     QListWidgetItem* allItem = new QListWidgetItem("All Files");
     allItem->setData(Qt::UserRole, "ALL");
@@ -350,7 +394,7 @@ void MainWindow::onTagSelected(QListWidgetItem *item)
                 std::filesystem::path p(path.toStdString());
                 std::string filename = p.filename().string();
                 
-                std::vector<std::string> filesWithTag = tagManager.getFilesByTag(tag.toStdString());
+                std::vector<std::string> filesWithTag = tagManager->getFilesByTag(tag.toStdString());
                 std::set<std::string> fileSet(filesWithTag.begin(), filesWithTag.end());
                 
                 bool match = (fileSet.find(filename) != fileSet.end());
@@ -452,7 +496,7 @@ void MainWindow::analyzeFile()
         return;
     }
 
-    if (!llamaEngine.isModelLoaded()) {
+    if (!llamaEngine->isModelLoaded()) {
         QMessageBox::warning(this, "Error", "Model not loaded. Please Open Folder containing GGUF model first, or use 'Load Model'."); // Simplified check
         return;
     }
@@ -462,7 +506,7 @@ void MainWindow::analyzeFile()
     std::string filenameStr = QFileInfo(filePath).fileName().toStdString();
     
     QFuture<std::string> future = QtConcurrent::run(QThreadPool::globalInstance(), [this, filenameStr, content]() -> std::string {
-        return llamaEngine.suggestTags(filenameStr, content);
+        return llamaEngine->suggestTags(filenameStr, content);
     });
     watcher->setFuture(future);
 }
@@ -476,7 +520,7 @@ void MainWindow::onAnalysisFinished()
 
 void MainWindow::saveTags()
 {
-    tagManager.saveTags();
+    tagManager->saveTags();
     btnSaveTags->setEnabled(false);
     lblStatus->setText("Tags Saved");
 }
@@ -493,7 +537,7 @@ void MainWindow::addTag()
                                          tr("Tag Name:"), QLineEdit::Normal,
                                          "", &ok);
     if (ok && !text.isEmpty()) {
-        tagManager.addTag(filename, text.toStdString());
+        tagManager->addTag(filename, text.toStdString());
         updateTagDisplay(QString::fromStdString(filename));
         updateTagList();
         btnSaveTags->setEnabled(true);
@@ -507,7 +551,7 @@ void MainWindow::removeTag()
     std::filesystem::path p(filePath.toStdString());
     std::string filename = p.filename().string();
     
-    std::vector<std::string> tags = tagManager.getTags(filename);
+    std::vector<std::string> tags = tagManager->getTags(filename);
     if (tags.empty()) return;
     
     QStringList items;
@@ -517,7 +561,7 @@ void MainWindow::removeTag()
     QString item = QInputDialog::getItem(this, tr("Remove Tag"), tr("Select Tag:"), items, 0, false, &ok);
     
     if (ok && !item.isEmpty()) {
-        tagManager.removeTag(filename, item.toStdString());
+        tagManager->removeTag(filename, item.toStdString());
         updateTagDisplay(QString::fromStdString(filename));
         updateTagList();
         btnSaveTags->setEnabled(true);
@@ -536,7 +580,7 @@ void MainWindow::removeGlobalTag()
                                    QString("Are you sure you want to delete tag '%1' from ALL files?").arg(tag),
                                    QMessageBox::Yes|QMessageBox::No);
      if (reply == QMessageBox::Yes) {
-         tagManager.deleteTag(tag.toStdString());
+         tagManager->deleteTag(tag.toStdString());
          updateTagList();
          if (!fileList->selectedItems().isEmpty()) {
              QString filePath = fileList->selectedItems().first()->data(0, Qt::UserRole).toString();
@@ -548,6 +592,9 @@ void MainWindow::removeGlobalTag()
 
 void MainWindow::filterFiles(const QString &text)
 {
+    // If text starts with '@', skip realtime filtering (wait for Enter)
+    if (text.startsWith("@")) return;
+
     QTreeWidgetItemIterator it(fileList);
     while (*it) {
         QString itemText = (*it)->text(0);
@@ -563,6 +610,70 @@ void MainWindow::filterFiles(const QString &text)
              }
         }
         ++it;
+    }
+}
+
+void MainWindow::onSearchReturnPressed() {
+    QString text = txtSearch->text();
+    if (text.isEmpty()) {
+        filterFiles("");
+        return;
+    }
+
+    if (text.startsWith("@")) {
+        // Semantic Search
+        QString query = text.mid(1); // Remove '@'
+        if (query.isEmpty()) return;
+        
+        lblStatus->setText("Searching Semantically...");
+        QApplication::processEvents();
+
+        // 1. Get Embedding
+        if (!llamaEngine->isModelLoaded()) {
+             QMessageBox::warning(this, "Error", "Llama model not loaded for semantic search.");
+             return;
+        }
+        
+        std::vector<float> queryVec = llamaEngine->getEmbeddings(query.toStdString());
+        if (queryVec.empty()) {
+             QMessageBox::warning(this, "Error", "Failed to generate query embedding.");
+             return;
+        }
+
+        // 2. Search DB
+        auto& db = DatabaseManager::instance();
+        std::vector<int> fileIds = db.findSimilarFiles(queryVec, 20); // Top 20
+
+        // 3. Filter Tree View
+        // Show ONLY these files.
+        QSet<QString> validPaths;
+        for (int id : fileIds) {
+            validPaths.insert(db.getFilePath(id));
+        }
+        
+        QTreeWidgetItemIterator it(fileList);
+        while (*it) {
+             QString path = (*it)->data(0, Qt::UserRole).toString();
+             // Skip directories in tree matching if they are containers
+             bool match = validPaths.contains(path);
+             (*it)->setHidden(!match);
+             
+             if (match) {
+                 QTreeWidgetItem* parent = (*it)->parent();
+                 while(parent) {
+                     parent->setHidden(false);
+                     parent->setExpanded(true);
+                     parent = parent->parent();
+                 }
+             }
+             ++it;
+        }
+        
+        lblStatus->setText(QString("Found %1 semantic matches.").arg(fileIds.size()));
+
+    } else {
+        // Normal Filter
+        filterFiles(text);
     }
 }
 
@@ -639,7 +750,7 @@ void MainWindow::updateFilePreview(const QString& filePath)
 
 void MainWindow::updateTagDisplay(const QString& filename)
 {
-    std::vector<std::string> tags = tagManager.getTags(filename.toStdString());
+    std::vector<std::string> tags = tagManager->getTags(filename.toStdString());
     QString tagStr = "標籤: ";
     for (const auto& t : tags) {
         tagStr += QString::fromStdString(t) + ", ";
@@ -673,7 +784,7 @@ void MainWindow::renameFile()
         
         if (QFile::rename(fullPath, newPath)) {
             // Note: tagManager.renameFile assumes simple filenames for keys, keep that consistent?
-            tagManager.renameFile(oldName.toStdString(), newName.toStdString());
+            tagManager->renameFile(oldName.toStdString(), newName.toStdString());
             scanFiles(); 
             lblStatus->setText(QString("已更名 %1 -> %2").arg(oldName).arg(newName));
         } else {
@@ -699,7 +810,7 @@ void MainWindow::deleteFile()
     
     if (reply == QMessageBox::Yes) {
         if (QFile::remove(fullPath)) {
-            tagManager.removeFile(filename.toStdString());
+            tagManager->removeFile(filename.toStdString());
             scanFiles();
             txtPreviewText->clear();
             lblPreviewImage->setText("已刪除 (Deleted)");
@@ -762,44 +873,74 @@ void MainWindow::onMoniFileDeleted(const QString &path)
 
 void MainWindow::onGenerateEmbedding()
 {
+    static bool isProcessing = false;
+    if (isProcessing) return;
+    isProcessing = true;
+
+    // RAII-style reset using a helper struct or try-catch block is safer, 
+    // but for simple slot, we just ensure we set it to false before every return.
+    // To cleanly handle multiple returns, I'll use a shared completion handler or careful coding.
+    // Better: use a scope guard.
+
+    struct ScopeGuard {
+        bool* flag;
+        ~ScopeGuard() { *flag = false; }
+    } guard{&isProcessing};
+
     QList<QTreeWidgetItem*> selectedItems = fileList->selectedItems();
     if (selectedItems.isEmpty()) return;
 
     QString filePath = selectedItems.first()->data(0, Qt::UserRole).toString();
     if (filePath.isEmpty()) return; 
 
-    lblStatus->setText("Reading Content...");
-    QApplication::processEvents();
-    
-    std::string content = DocumentParser::extractText(filePath.toStdString());
-    if (content.empty()) {
-        QMessageBox::warning(this, "Info", "No text content extracted.");
-        lblStatus->setText("Ready");
-        return;
-    }
-
-    if (!llamaEngine.isModelLoaded()) {
-        QMessageBox::warning(this, "Error", "Please load model first (Open Folder).");
-        return;
-    }
+    // Check extension
+    QString ext = QFileInfo(filePath).suffix().toLower();
+    bool isImage = QStringList{"png", "jpg", "jpeg", "bmp", "gif"}.contains(ext);
 
     lblStatus->setText("Generating Embedding...");
     QApplication::processEvents();
     
-    std::vector<float> vec = llamaEngine.getEmbeddings(content);
+    std::vector<float> vec;
+    
+    if (isImage) {
+        if (!visionEngine->isAvailable()) {       
+             QMessageBox::warning(this, "Error", "Vision Engine not available (Libraries missing).");
+             return;
+        }
+        if (!visionEngine->isLoaded()) {
+             QMessageBox::warning(this, "Error", "Vision Model not loaded.\nEnsure 'models/clip-vision.onnx' exists.");
+             return;
+        }
+        vec = visionEngine->extractFeatures(filePath.toStdString());
+    } else {
+        // Text
+        std::string content = DocumentParser::extractText(filePath.toStdString());
+        if (content.empty()) {
+             QMessageBox::warning(this, "Info", "No text content extracted.");
+             lblStatus->setText("Ready");
+             return;
+        }
+        if (!llamaEngine->isModelLoaded()) {
+             QMessageBox::warning(this, "Error", "Please load Llama model first.");
+             return;
+        }
+        vec = llamaEngine->getEmbeddings(content);
+    }
+
     if (vec.empty()) {
-        QMessageBox::critical(this, "Error", "Failed to generate embedding.");
+        QMessageBox::critical(this, "Error", "Failed to generate embedding (Vector empty).");
         lblStatus->setText("Error");
         return;
     }
 
+    // Save to DB
     auto& db = DatabaseManager::instance();
     db.addFile(filePath);
     int fileId = db.getFileId(filePath);
     
     if (db.saveVector(fileId, vec)) {
         lblStatus->setText("Vector Saved!");
-        QMessageBox::information(this, "Success", "Vector saved to database.");
+        QMessageBox::information(this, "Success", QString("Vector saved (Dim: %1)").arg(vec.size()));
     } else {
         lblStatus->setText("Save Failed");
         QMessageBox::critical(this, "Error", "Failed to save to database.");
@@ -856,7 +997,7 @@ void MainWindow::loadModel()
         lblStatus->setText("Loading Model...");
         QApplication::processEvents();
         
-        if (llamaEngine.loadModel(fileName.toStdString())) {
+        if (llamaEngine->loadModel(fileName.toStdString())) {
              lblStatus->setText("Model Loaded: " + fileName);
              QMessageBox::information(this, "Info", "Model Loaded Successfully");
         } else {
