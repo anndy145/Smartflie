@@ -78,7 +78,7 @@ Write-Host "Checking for external DLLs..."
 $LibsDir = Join-Path $ProjectRoot "libs"
 # Check libs folder (CI/Repo structure)
 if (Test-Path $LibsDir) {
-    $Dlls = @("opencv_world*.dll", "onnxruntime*.dll")
+    $Dlls = @("opencv_world*.dll", "libopencv_*.dll", "opencv_videoio_ffmpeg*.dll", "onnxruntime*.dll")
     foreach ($pattern in $Dlls) {
         Get-ChildItem -Path $LibsDir -Filter $pattern -Recurse | ForEach-Object {
             $Dest = Join-Path $OutputDir $_.Name
