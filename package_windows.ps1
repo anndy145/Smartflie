@@ -65,8 +65,7 @@ if (Test-Path $LlamaDll) {
     Write-Host "Copying llama.dll..."
 }
 
-    Write-Host "Copying llama.dll..."
-}
+
 
 # 6. Create Portable ZIP
 $ZipPath = Join-Path $ProjectRoot "SmartFile_Portable_v1.0.zip"
