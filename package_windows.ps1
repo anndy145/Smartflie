@@ -11,6 +11,8 @@ $ExeName = "SmartFileOrganizer.exe"
 $OutputDir = Join-Path $ProjectRoot "release_staging"
 # If Qt is not in PATH, specify bin dir here, e.g. "C:\Qt\6.6.0\msvc2019_64\bin"
 $QtBinDir = "C:\Qt\6.10.1\mingw_64\bin" 
+# If hardcoded path doesn't exist (e.g. in CI), clear it to use PATH
+if (-not (Test-Path $QtBinDir)) { $QtBinDir = "" } 
 
 # Validate Source
 $ExePath = Join-Path $BuildDir $ExeName
