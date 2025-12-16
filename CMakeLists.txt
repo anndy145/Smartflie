@@ -23,8 +23,8 @@ endif()
 set(LIBS_DIR "${CMAKE_SOURCE_DIR}/libs")
 
 # 1. OpenCV
-# set(OpenCV_DIR "${LIBS_DIR}/OpenCV-MinGW-Build-OpenCV-4.5.5-x64/x64/mingw/lib") # Hint for find_package
-# set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${LIBS_DIR}/OpenCV-MinGW-Build-OpenCV-4.5.5-x64/x64/mingw")
+set(OpenCV_DIR "${LIBS_DIR}/OpenCV-MinGW-Build-OpenCV-4.5.5-x64/x64/mingw/lib") # Hint for find_package
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${LIBS_DIR}/OpenCV-MinGW-Build-OpenCV-4.5.5-x64/x64/mingw")
 
 find_package(OpenCV QUIET)
 if (OpenCV_FOUND)
@@ -112,7 +112,7 @@ if(OpenCV_FOUND)
 endif()
 
 if(ONNX_FOUND)
-    target_link_libraries(SmartFileOrganizer PRIVATE onnxruntime)
+    target_link_libraries(SmartFileOrganizer PRIVATE "${ONNX_ROOT}/lib/onnxruntime.lib")
     target_compile_definitions(SmartFileOrganizer PRIVATE ENABLE_ONNX)
 endif()
 
