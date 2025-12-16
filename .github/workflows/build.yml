@@ -75,8 +75,8 @@ jobs:
         run: |
           mkdir -p build dist/${{ matrix.build }}
           if [[ ${{ matrix.build }} == "windows_x64" ]]; then
-            # Install Inno Setup
-            choco install innosetup
+            # Install Inno Setup & 7-Zip
+            choco install innosetup 7zip
 
             # Compile
             cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release

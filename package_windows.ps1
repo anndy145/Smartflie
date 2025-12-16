@@ -68,14 +68,51 @@ if (Test-Path $LlamaDll) {
 
 
 # 6. Create Portable ZIP
-$ZipPath = Join-Path $ProjectRoot "SmartFile_Portable_v1.0.zip"
-Write-Host "Creating Portable ZIP: $ZipPath..."
-if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
-Compress-Archive -Path "$OutputDir\*" -DestinationPath $ZipPath -Force
+# 6. Create Portable SFX (Self-Extracting Executable)
+$SfxName = "SmartFile_Portable_v1.0.exe"
+$SfxPath = Join-Path $ProjectRoot $SfxName
+$SevenZip = "C:\Program Files\7-Zip\7z.exe"
+$SfxModule = "C:\Program Files\7-Zip\7z.sfx"
+
+if (Test-Path $SevenZip) {
+    Write-Host "Creating Portable SFX: $SfxPath..."
+    
+    # 6a. Create 7z Archive
+    $Archive7z = Join-Path $ProjectRoot "app.7z"
+    if (Test-Path $Archive7z) { Remove-Item $Archive7z -Force }
+    & $SevenZip a -t7z -mx9 "$Archive7z" "$OutputDir\*" | Out-Null
+    
+    # 6b. Create Config
+    $ConfigPath = Join-Path $ProjectRoot "sfx_config.txt"
+    $ConfigContent = ";!@Install@!UTF-8!`nTitle=""Smart File Organizer""`nExecuteFile=""SmartFileOrganizer.exe""`nGUIMode=""1""`n;!@InstallEnd@!"
+    Set-Content -Path $ConfigPath -Value $ConfigContent -Encoding UTF8
+    
+    # 6c. Combine (Binary Copy)
+    # copy /b 7z.sfx + config.txt + app.7z target.exe
+    if (Test-Path $SfxModule) {
+        cmd /c "copy /b ""$SfxModule"" + ""$ConfigPath"" + ""$Archive7z"" ""$SfxPath"""
+        Write-Host "SFX Created successfully: $SfxPath"
+    } else {
+        Write-Host "SFX Module not found ($SfxModule), falling back to ZIP." -ForegroundColor Yellow
+        $ZipPath = Join-Path $ProjectRoot "SmartFile_Portable_v1.0.zip"
+        Compress-Archive -Path "$OutputDir\*" -DestinationPath $ZipPath -Force
+        Write-Host "Created ZIP instead: $ZipPath"
+    }
+
+    # Cleanup temp
+    if (Test-Path $Archive7z) { Remove-Item $Archive7z -Force }
+    if (Test-Path $ConfigPath) { Remove-Item $ConfigPath -Force }
+
+} else {
+    Write-Host "7-Zip not found, falling back to standard ZIP."
+    $ZipPath = Join-Path $ProjectRoot "SmartFile_Portable_v1.0.zip"
+    Compress-Archive -Path "$OutputDir\*" -DestinationPath $ZipPath -Force
+    Write-Host "Portable ZIP: $ZipPath"
+}
 
 Write-Host "Packaging Complete!" -ForegroundColor Green
 Write-Host "  - Staging: $OutputDir"
-Write-Host "  - Portable ZIP: $ZipPath"
+if (Test-Path $SfxPath) { Write-Host "  - Portable Executable: $SfxPath" }
 Write-Host "Next Step: Compile installer_windows.iss (Optional)"
 
 # 7. Create Installer (Inno Setup)
