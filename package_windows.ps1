@@ -32,7 +32,7 @@ Copy-Item $ExePath $OutputDir
 # 3. Run windeployqt
 Write-Host "Running windeployqt to capture Qt dependencies..."
 $Windeployqt = "windeployqt.exe"
-if ($QtBinDir -ne "" -and (Test-Path $QtBinDir)) {
+if ($QtBinDir -ne "") {
     $Windeployqt = Join-Path $QtBinDir "windeployqt.exe"
 }
 
@@ -42,13 +42,7 @@ try {
         throw "windeployqt not found in PATH"
     }
     
-    & $Windeployqt --dir $OutputDir "$OutputDir\$ExeName" --no-translations --no-opengl-sw
-    # Remove optional heavy DLLs if they exist
-    $UnusedDlls = @("D3Dcompiler_47.dll", "opengl32sw.dll")
-    foreach ($dll in $UnusedDlls) {
-        $path = Join-Path $OutputDir $dll
-        if (Test-Path $path) { Remove-Item $path -Force }
-    }
+    & $Windeployqt --dir $OutputDir "$OutputDir\$ExeName" --no-translations --no-compiler-runtime
 } catch {
     Write-Host "Error: Failed to run windeployqt. Ensure it is in PATH or set `$QtBinDir` in script." -ForegroundColor Red
     Write-Host "Details: $_"
@@ -71,37 +65,21 @@ if (Test-Path $LlamaDll) {
     Write-Host "Copying llama.dll..."
 }
 
-
-
-# 5b. Copy DLLs (OpenCV, ONNX Runtime)
-Write-Host "Checking for external DLLs..."
-$LibsDir = Join-Path $ProjectRoot "libs"
-# Check libs folder (CI/Repo structure)
-if (Test-Path $LibsDir) {
-    $Dlls = @("opencv_world*.dll", "libopencv_*.dll", "opencv_videoio_ffmpeg*.dll", "onnxruntime*.dll")
-    foreach ($pattern in $Dlls) {
-        Get-ChildItem -Path $LibsDir -Filter $pattern -Recurse | ForEach-Object {
-            $Dest = Join-Path $OutputDir $_.Name
-            if (-not (Test-Path $Dest)) {
-                Copy-Item $_.FullName $OutputDir
-                Write-Host "  Copied $($_.Name) from Libs"
-            }
-        }
-    }
-}
-# Check Build folder (Local Dev)
-$Dlls = @("opencv_world*.dll", "onnxruntime*.dll")
-foreach ($pattern in $Dlls) {
-    Get-ChildItem -Path $BuildDir -Filter $pattern | ForEach-Object {
-        $Dest = Join-Path $OutputDir $_.Name
-        if (-not (Test-Path $Dest)) {
-            Copy-Item $_.FullName $OutputDir
-            Write-Host "  Copied $($_.Name) from Build"
-        }
-    }
+    Write-Host "Copying llama.dll..."
 }
 
-# 6. Create Installer (Inno Setup)
+# 6. Create Portable ZIP
+$ZipPath = Join-Path $ProjectRoot "SmartFile_Portable_v1.0.zip"
+Write-Host "Creating Portable ZIP: $ZipPath..."
+if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
+Compress-Archive -Path "$OutputDir\*" -DestinationPath $ZipPath -Force
+
+Write-Host "Packaging Complete!" -ForegroundColor Green
+Write-Host "  - Staging: $OutputDir"
+Write-Host "  - Portable ZIP: $ZipPath"
+Write-Host "Next Step: Compile installer_windows.iss (Optional)"
+
+# 7. Create Installer (Inno Setup)
 Write-Host "Checking for Inno Setup..."
 $ISCC = "ISCC.exe"
 # Common paths for Inno Setup
@@ -128,10 +106,3 @@ if ((Get-Command $ISCC -ErrorAction SilentlyContinue) -ne $null -or (Test-Path $
     Write-Host "Please install Inno Setup 6+ to generate the .exe installer."
 }
 
-Write-Host "Packaging Complete!" -ForegroundColor Green
-Write-Host "  - Portable ZIP: $ZipPath"
-
-# Cleanup Staging (Optional)
-Write-Host "Cleaning up staging directory to save space..."
-# if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
-Write-Host "Done."

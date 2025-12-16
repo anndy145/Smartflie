@@ -135,7 +135,10 @@ jobs:
             platform=${dir#"artifact-"}
             unset exe
             if [[ $platform =~ "windows" ]]; then
+              # Zip the folder anyway for backup (optional)
               zip -r dist/${platform}.zip $dir
+              # Copy the Installer EXE directly so it appears as a standalone asset
+              find $dir -name "*.exe" -exec cp {} dist/ \;
             elif [[ $platform =~ "macos" ]]; then
               zip -r dist/${platform}.zip $dir
               # TODO: make dmg
