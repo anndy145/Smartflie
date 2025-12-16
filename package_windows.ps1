@@ -42,7 +42,7 @@ try {
         throw "windeployqt not found in PATH"
     }
     
-    & $Windeployqt --dir $OutputDir "$OutputDir\$ExeName" --no-translations --no-compiler-runtime --no-opengl-sw
+    & $Windeployqt --dir $OutputDir "$OutputDir\$ExeName" --no-translations --no-opengl-sw
     # Remove optional heavy DLLs if they exist
     $UnusedDlls = @("D3Dcompiler_47.dll", "opengl32sw.dll")
     foreach ($dll in $UnusedDlls) {
@@ -133,5 +133,5 @@ Write-Host "  - Portable ZIP: $ZipPath"
 
 # Cleanup Staging (Optional)
 Write-Host "Cleaning up staging directory to save space..."
-if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
+# if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
 Write-Host "Done."
