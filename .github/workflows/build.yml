@@ -30,6 +30,7 @@ jobs:
           - build: windows_x64
             os: windows-latest
 
+
     steps:
       - if: ${{ matrix.os == 'windows-latest' }}
         uses: jurplel/install-qt-action@v4
@@ -37,21 +38,12 @@ jobs:
           version: ${{env.QT_VERSION}}
           arch: win64_mingw
 
-      - if: ${{ matrix.os != 'windows-latest' }}
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{env.QT_VERSION}}
 
       - name: Install Build Dependencies
         shell: bash
         run: |
-          if [[ ${{ matrix.build }} == "macos_arm64" ]]; then
-            brew upgrade
-          elif [[ ${{ matrix.build }} == "windows_x64" ]]; then
+          if [[ ${{ matrix.build }} == "windows_x64" ]]; then
             echo "Nothing to do for now..."
-          elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
-            sudo apt-get update
-            sudo apt-get install ninja-build cmake
           fi
 
       - name: Checkout
@@ -88,16 +80,6 @@ jobs:
             # Move the generated setup exe to dist
             mv SmartFile_Setup_*.exe dist/${{ matrix.build }}/
             
-          elif [[ ${{ matrix.build }} == "macos_arm64" ]]; then
-            cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
-            ninja -C build
-            cp build/SmartFileOrganizer dist/${{ matrix.build }}
-            cp -r build/bin/* dist/${{ matrix.build }}
-          elif [[ ${{ matrix.build }} == "linux_x64" ]]; then
-            cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$CFLAGS -march=x86-64-v2" -DCMAKE_CXX_FLAGS="$CXXFLAGS -march=x86-64-v2"
-            ninja -C build
-            cp build/SmartFileOrganizer dist/${{ matrix.build }}
-            cp -r build/bin/* dist/${{ matrix.build }}
           fi
 
       - uses: actions/upload-artifact@v4
@@ -139,12 +121,6 @@ jobs:
               zip -r dist/${platform}.zip $dir
               # Copy the Installer EXE directly so it appears as a standalone asset
               find $dir -name "*.exe" -exec cp {} dist/ \;
-            elif [[ $platform =~ "macos" ]]; then
-              zip -r dist/${platform}.zip $dir
-              # TODO: make dmg
-            elif [[ $platform =~ "linux" ]]; then
-              zip -r dist/${platform}.zip $dir
-              # TODO: make appimage
             fi
           done
 
