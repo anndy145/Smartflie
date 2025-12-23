@@ -11,6 +11,16 @@ $ExeName = "SmartFileOrganizer.exe"
 $OutputDir = Join-Path $ProjectRoot "release_staging"
 # If Qt is not in PATH, specify bin dir here, e.g. "C:\Qt\6.6.0\msvc2019_64\bin"
 $QtBinDir = "C:\Qt\6.10.1\mingw_64\bin" 
+$MinGWBinDir = "C:\Qt\Tools\mingw1310_64\bin" # Adjust based on user's actual MinGW path or use gcc path
+if (-not (Test-Path $MinGWBinDir)) {
+   # Try to find from gcc path
+   try {
+       $GccPath = (Get-Command gcc).Source
+       $MinGWBinDir = Split-Path $GccPath
+   } catch {
+       $MinGWBinDir = ""
+   }
+} 
 # If hardcoded path doesn't exist (e.g. in CI), clear it to use PATH
 if (-not (Test-Path $QtBinDir)) { $QtBinDir = "" } 
 
@@ -44,7 +54,7 @@ try {
         throw "windeployqt not found in PATH"
     }
     
-    & $Windeployqt --dir $OutputDir "$OutputDir\$ExeName" --no-translations --no-compiler-runtime
+    & $Windeployqt --dir $OutputDir "$OutputDir\$ExeName" --no-translations
 } catch {
     Write-Host "Error: Failed to run windeployqt. Ensure it is in PATH or set `$QtBinDir` in script." -ForegroundColor Red
     Write-Host "Details: $_"
@@ -67,10 +77,46 @@ if (Test-Path $LlamaDll) {
     Write-Host "Copying llama.dll..."
 }
 
+# 5a. Copy MinGW Runtimes (if windeployqt didn't catch them)
+$MinGWDlls = @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")
+if ($MinGWBinDir -ne "") {
+    foreach ($dll in $MinGWDlls) {
+        $Src = Join-Path $MinGWBinDir $dll
+        $Dest = Join-Path $OutputDir $dll
+        if (-not (Test-Path $Dest)) {
+            if (Test-Path $Src) {
+                Copy-Item $Src $OutputDir
+                Write-Host "Copied $dll"
+            } else {
+                Write-Host "Warning: Could not find $dll at $Src" -ForegroundColor Yellow
+            }
+        }
+    }
+}
+
+# 6. Copy OpenCV DLLs
+$OpenCVBin = Join-Path $ProjectRoot "libs\OpenCV-MinGW-Build-OpenCV-4.5.5-x64\x64\mingw\bin"
+if (Test-Path $OpenCVBin) {
+    Write-Host "Copying OpenCV DLLs..."
+    Get-ChildItem -Path $OpenCVBin -Filter "libopencv*.dll" | Copy-Item -Destination $OutputDir
+    Get-ChildItem -Path $OpenCVBin -Filter "opencv_videoio_ffmpeg*.dll" | Copy-Item -Destination $OutputDir
+} else {
+    Write-Host "Warning: OpenCV bin directory not found at $OpenCVBin" -ForegroundColor Yellow
+}
+
+# 7. Copy OnnxRuntime DLLs
+$OnnxBin = Join-Path $ProjectRoot "libs\onnxruntime-win-x64-1.16.3\lib"
+if (Test-Path $OnnxBin) {
+    Write-Host "Copying OnnxRuntime DLLs..."
+    Get-ChildItem -Path $OnnxBin -Filter "*.dll" | Copy-Item -Destination $OutputDir
+} else {
+    Write-Host "Warning: OnnxRuntime bin directory not found at $OnnxBin" -ForegroundColor Yellow
+}
 
 
-# 6. Create Portable ZIP
-# 6. Create Portable SFX (Self-Extracting Executable)
+
+# 8. Create Portable SFX (Self-Extracting Executable)
+# 8. Create Portable SFX (Self-Extracting Executable)
 $SfxName = "SmartFile_Portable_v1.0.exe"
 $SfxPath = Join-Path $ProjectRoot $SfxName
 $SevenZip = "C:\Program Files\7-Zip\7z.exe"
@@ -117,7 +163,7 @@ Write-Host "  - Staging: $OutputDir"
 if (Test-Path $SfxPath) { Write-Host "  - Portable Executable: $SfxPath" }
 Write-Host "Next Step: Compile installer_windows.iss (Optional)"
 
-# 7. Create Installer (Inno Setup)
+# 9. Create Installer (Inno Setup)
 Write-Host "Checking for Inno Setup..."
 $ISCC = "ISCC.exe"
 # Common paths for Inno Setup

@@ -82,3 +82,4 @@ INSTALLER_GUIDE.md
 supported_formats.txt
 
 models/
+build_local.ps1
