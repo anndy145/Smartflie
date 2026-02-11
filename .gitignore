@@ -80,6 +80,7 @@ SRS.md
 DISTRIBUTION.md
 INSTALLER_GUIDE.md
 supported_formats.txt
+report.md
 
 models/
 build_local.ps1
