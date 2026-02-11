@@ -109,11 +109,37 @@ target_link_libraries(SmartFileOrganizer PRIVATE Qt6::Widgets Qt6::Concurrent Qt
 if(OpenCV_FOUND)
     target_link_libraries(SmartFileOrganizer PRIVATE ${OpenCV_LIBS})
     target_compile_definitions(SmartFileOrganizer PRIVATE ENABLE_OPENCV)
+    
+    # Copy OpenCV DLLs to output directory (Windows Only)
+    if(WIN32)
+        add_custom_command(TARGET SmartFileOrganizer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${OpenCV_DIR}/../bin/libopencv_core455.dll"
+            "${OpenCV_DIR}/../bin/libopencv_imgproc455.dll"
+            "${OpenCV_DIR}/../bin/libopencv_imgcodecs455.dll"
+            "${OpenCV_DIR}/../bin/libopencv_videoio455.dll"
+            "${OpenCV_DIR}/../bin/opencv_videoio_ffmpeg455_64.dll"
+            "${OpenCV_DIR}/../bin/libopencv_dnn455.dll" # Required for VisionEngine
+            $<TARGET_FILE_DIR:SmartFileOrganizer>
+            COMMENT "Copying OpenCV DLLs..."
+        )
+    endif()
 endif()
 
 if(ONNX_FOUND)
     target_link_libraries(SmartFileOrganizer PRIVATE "${ONNX_ROOT}/lib/onnxruntime.lib")
     target_compile_definitions(SmartFileOrganizer PRIVATE ENABLE_ONNX)
+    
+    # Copy ONNX Runtime DLLs (Windows Only)
+    if(WIN32)
+        add_custom_command(TARGET SmartFileOrganizer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNX_ROOT}/lib/onnxruntime.dll"
+            "${ONNX_ROOT}/lib/onnxruntime_providers_shared.dll"
+            $<TARGET_FILE_DIR:SmartFileOrganizer>
+            COMMENT "Copying ONNX Runtime DLLs..."
+        )
+    endif()
 endif()
 
 if(WIN32)

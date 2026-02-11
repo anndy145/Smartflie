@@ -194,17 +194,20 @@ std::string LlamaEngine::suggestTags(const std::string& filename, const std::str
     
     std::string prompt = 
         "<|im_start|>system\n"
-        "You are a strict file tagging assistant. Your ONLY job is to output a comma-separated list of tags in Traditional Chinese (繁體中文).\n"
-        "Rules:\n"
-        "1. Output ONLY the tags. No introductory text. No explanations.\n"
-        "2. Suggest exactly 3-5 tags.\n"
-        "3. Tags must be concise (max 4 words).\n"
-        "4. Do NOT output full sentences.\n"
-        "Example Input:\n"
-        "Filename: report.pdf\n"
-        "Content: Q3 Financial Summary...\n"
-        "Example Output:\n"
-        "財務報告, 第三季, 業績\n"
+        "You are a file tagging engine. Your task is to analyze the file content and output exactly 3-5 tags in Traditional Chinese (繁體中文).\n"
+        "RULES:\n"
+        "1. Output ONLY the tags, separated by commas.\n"
+        "2. DO NOT output introductory text (e.g. \"Here are the tags\", \"標籤如下\").\n"
+        "3. DO NOT provide explanations.\n"
+        "4. Tags must be concise (max 4 words).\n"
+        "5. Use Traditional Chinese (繁體中文) for all tags.\n"
+        "<|im_end|>\n"
+        "<|im_start|>user\n"
+        "Filename: annual_report_2023.pdf\n"
+        "Content Preview: 公司名稱：台積電...\n"
+        "<|im_end|>\n"
+        "<|im_start|>assistant\n"
+        "財務報告, 2023年, 半導體, 台積電\n"
         "<|im_end|>\n"
         "<|im_start|>user\n"
         "Filename: " + filename + "\n"
@@ -212,7 +215,40 @@ std::string LlamaEngine::suggestTags(const std::string& filename, const std::str
         "<|im_end|>\n"
         "<|im_start|>assistant\n";
 
-    return generateResponse(prompt);
+    std::string rawOutput = generateResponse(prompt);
+    
+    // --- Output Cleaning / Post-processing ---
+    // 1. Find the last non-empty line (Model might output reasoning before the final answer)
+    std::string finalLine;
+    std::stringstream ss(rawOutput);
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (!line.empty()) {
+            // Check if line looks like tags (contains comma) or is just text
+            // For now, we assume the model follows instructions mostly, but we pick the last line
+            // as it's conventionally the answer in Chain-of-Thought scenarios (though we discouraged CoT)
+            finalLine = line;
+        }
+    }
+    
+    // 2. Remove common prefixes if present
+    const std::vector<std::string> prefixes = {
+        "Tags:", "tags:", "Output:", "output:", "標籤:", "建議標籤:", "Here are the tags:"
+    };
+    
+    for (const auto& prefix : prefixes) {
+        if (finalLine.find(prefix) == 0) {
+            finalLine = finalLine.substr(prefix.length());
+            break;
+        }
+    }
+    
+    // 3. Trim whitespace
+    const char* ws = " \t\n\r\f\v";
+    finalLine.erase(0, finalLine.find_first_not_of(ws));
+    finalLine.erase(finalLine.find_last_not_of(ws) + 1);
+    
+    return finalLine;
 }
 
 std::vector<float> LlamaEngine::getEmbeddings(const std::string& text)
